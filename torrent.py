@@ -3,15 +3,20 @@ from string import digits
 from hashlib import sha1
 from bcoding import bdecode, bencode
 
+
 class Torrent():
 
-    def __init__(self, metainfo):
-        self.tracker_url = metainfo['announce']
-        self.info = metainfo['info']
+    def __init__(self, torrent_file):
+        self.metainfo = self.read_torrent_file(torrent_file)
+        self.tracker_url = self.metainfo['announce']
+        self.info = self.metainfo['info']
         self.info_hash = sha1(bencode(self.info)).digest()
         self.peer_id = self.generate_peer_id()
         self.left = self.file_length()
 
+    def read_torrent_file(self, torrent_file):
+        with open(torrent_file, 'rb') as f:
+            return bdecode(f.read())
 
     def generate_peer_id(self):
         client_id = 'AS'
