@@ -2,13 +2,18 @@ import asyncio
 import struct
 import logging
 
+KEEPALIVE = bytes([0, 0, 0, 0])
+CHOKE = bytes([0, 0, 0, 1]) + bytes([0])
+UNCHOKE = bytes([0, 0, 0, 1]) + bytes([1])
+INTERESTED = bytes([0, 0, 0, 1]) + bytes([2])
+NOT_INTERESTED = bytes([0, 0, 0, 1]) + bytes([3])
 
 class PeerProtocol(asyncio.Protocol):
 
     def __init__(self, torrent):
         self.torrent = torrent
         self.logger = logging.getLogger('main.peer_protocol')
-        self.message_buffer = bytes()
+        self.data = bytes()
 
     def connection_made(self, transport):
         # a tuple containing (host, port)
@@ -26,48 +31,95 @@ class PeerProtocol(asyncio.Protocol):
         """
 
         # existing message buffer
-        if self.message_buffer:
-            # self.logger.info('here~~~~~~~~~~~~')
-            # self.logger.info('existing buffer from {}: {}'.format(self.peer, self.message_buffer))
-            self.message_buffer += data
-            # self.logger.info('conactenated buffer from {}: {}'.format(self.peer, self.message_buffer))
-        else:
-            # self.logger.info('here++++++++++++')
-            self.message_buffer = data
-            # self.logger.info('new buffer from {}: {}'.format(self.peer, self.message_buffer))
+        # if self.data:
+            # self.logger.info('existing buffer from {}: {}'.format(self.peer, self.data))
+            # self.data += data
+            # self.logger.info('conactenated buffer from {}: {}'.format(self.peer, self.data))
+        # else:
+        #     self.data = data
+            # self.logger.info('new buffer from {}: {}'.format(self.peer, self.data))
 
-        if self.message_buffer[1:20].lower() == b'bittorrent protocol':
+        if data[1:20].lower() == b'bittorrent protocol':
             # info hash is 20 bytes long
             received_info_hash = data[28:48]
             if received_info_hash != self.torrent.info_hash:
                 self._close_connection()
             else:
-                # message that comes immediately after the hand shake
-                self.message_buffer = data[68:]
+                data = data[68:]
+                self.logger.info('Sending INTERESTED message to Peer {}'.format(self.peer))
+                self.transport.write(INTERESTED)
 
-        if len(self.message_buffer) >= 4:
-            message_length = struct.unpack('!i', self.message_buffer[:4])[0]
-            message_id = self.message_buffer[4]
-            self.logger.info('{}, length: {}, buffer length: {}'.format(
-                self.peer, message_length, len(self.message_buffer)
-                ))
-
-        # wait until the length of message buffer is greater or equal
-        # to message_length obtained from first 4 bytes of self.message_buffer
-        if len(self.message_buffer) >= message_length:
-            self._read_message(self.message_buffer, message_length)
-
+        self._process_data(data)
 
     def connection_lost(self, exc):
         self.logger.info('disconnected...from {}'.format(self.peer))
         if exc is not None:
             self.logger.error('exc: {}'.format(exc))
 
-    def _read_message(self, message_buffer,  message_length):
-        message_id = message_buffer[4]
-        message_body = message_buffer[4:message_length + 1]
-        self.logger.info('messages received from: {}, length: {}, body: {}'.format(
-                self.peer, len(self.message_buffer), message_body))
+    def _process_data(self, data):
+        if self.data:
+            self.data += data
+        else:
+            self.data = data
+
+        # self.logger.info(self.data)
+        while len(self.data) > 0:
+            offset = 0
+            message_length = struct.unpack(
+                    '!i', self.data[0:4])[0]
+
+            offset += 4
+            # self.logger.info('from Peer {}, message length {}, {}'.format(self.peer, message_length, self.data))
+            if len(self.data) - offset < message_length:
+                self.logger.info('need more data, message length: {}, data length: {}'.format(message_length, len(self.data)))
+                self.logger.info('data: {}'.format(self.data))
+                return
+            elif message_length == 0:
+                self.logger.debug('Peer {} sent KEEP ALIVE message'.format(self.peer))
+                return
+            else:
+                self.logger.info('enough data collected, message length: {}, data length: {}'.format(message_length, len(self.data)))
+                self.logger.info('data: {}'.format(self.data))
+                message_id = self.data[offset]
+                payload = self.data[offset+1:message_length+1] if message_length > 1 else NULL
+
+                self._parse_message(message_id, payload)
+
+                offset += message_length
+                self.data = self.data[offset:]
+                self.logger.info('overflew data: {}, length: {}'.format(self.data[offset:], len(self.data[offset:])))
+
+                # self.logger.info(
+                #         'data received from Peer {}, message id: {}, data length: {}, message length: {}'.format(
+                #         self.peer, message_id, len(self.data), message_length))
+                # self._parse_message(message_id)
+
+            # elif message_length == 0:
+            #     self.logger.debug('Peer {} sent KEEP ALIVE message'.format(self.peer))
+            # else:
+            #     # not enough data received
+            #     self.logger.debug('not enough data from Peer {}, message length: {}, data length: {}'.format(self.peer, message_length, len(self.data)))
+            #     return
+
+    def _parse_message(self, message_id):
+        if message_id == 0:
+            self.logger.debug('Peer {} sent CHOKE message'.format(self.peer))
+        elif message_id == 1:
+            self.logger.debug('Peer {} sent UNCHOKE message'.format(self.peer))
+        elif message_id == 2:
+            self.logger.debug('Peer {} sent INTERESTED message'.format(self.peer))
+        elif message_id == 3:
+            self.logger.debug('Peer {} sent NOT INTERESTED message'.format(self.peer))
+        elif message_id == 4:
+            self.logger.debug('Peer {} sent HAVE message'.format(self.peer))
+        elif message_id == 5:
+            self.logger.debug('Peer {} sent BITFIELD message'.format(self.peer))
+        elif message_id == 6:
+            self.logger.debug('Peer {} sent REQUEST message'.format(self.peer))
+        elif message_id == 7:
+            self.logger.debug('Peer {} sent PIECE message'.format(self.peer))
+        elif message_id == 8:
+            self.logger.debug('Peer {} sent CANCEL message'.format(self.peer))
 
     def _close_connection(self):
         self.transport.close()

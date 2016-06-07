@@ -85,11 +85,13 @@ class TorrentClient():
         except TimeoutError as e:
             pass
 
-    async def _connect_to_peers(self):
+    async def _connect_to_peers(self, future):
         await asyncio.gather(
                 *[self._connect_to_peer(peer) for peer in self.peers],
                 loop=self.loop
                 )
+
+        future.set_result('future is done!')
 
         # return [
         #     asyncio.ensure_future(

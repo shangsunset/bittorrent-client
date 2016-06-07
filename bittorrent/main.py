@@ -17,15 +17,19 @@ ch.setFormatter(formatter)
 logger.addHandler(fh)
 logger.addHandler(ch)
 
+def done(future):
+    logger.info(future.result())
+    # loop.stop()
 
 def main():
-    loop = asyncio.get_event_loop()
-
     filename = '../street-fighter.torrent'
     client = TorrentClient(filename, loop)
 
+    asyncio.ensure_future(client._connect_to_peers(future))
+    future.add_done_callback(done)
+
     try:
-        loop.run_until_complete(client._connect_to_peers())
+        loop.run_forever()
     except KeyboardInterrupt:
         pass
     finally:
@@ -33,4 +37,7 @@ def main():
 
 
 if __name__ == '__main__':
+    loop = asyncio.get_event_loop()
+    future = asyncio.Future()
+
     main()
