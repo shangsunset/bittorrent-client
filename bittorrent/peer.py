@@ -1,6 +1,8 @@
 import asyncio
+import random
 import struct
 import logging
+from bitstring import BitArray
 
 KEEPALIVE = bytes([0, 0, 0, 0])
 CHOKE = bytes([0, 0, 0, 1]) + bytes([0])
@@ -14,6 +16,8 @@ class PeerProtocol(asyncio.Protocol):
         self.torrent = torrent
         self.logger = logging.getLogger('main.peer_protocol')
         self.data = bytes()
+        self.has_pieces = []
+        self.block_offset = 0
 
     def connection_made(self, transport):
         # a tuple containing (host, port)
@@ -78,10 +82,10 @@ class PeerProtocol(asyncio.Protocol):
                 self.logger.debug('Peer {} sent KEEP ALIVE message'.format(self.peer))
                 return
             else:
-                self.logger.info('enough data collected, message length: {}, data length: {}'.format(message_length, len(self.data)))
+                self.logger.info('enough data collected, message length: {}, data length: {}, offset: {}'.format(message_length, len(self.data), offset))
                 self.logger.info('data: {}'.format(self.data))
                 message_id = self.data[offset]
-                payload = self.data[offset+1:message_length+1] if message_length > 1 else NULL
+                payload = self.data[offset+1:offset+message_length] if message_length > 1 else None
 
                 self._parse_message(message_id, payload)
 
@@ -101,23 +105,59 @@ class PeerProtocol(asyncio.Protocol):
             #     self.logger.debug('not enough data from Peer {}, message length: {}, data length: {}'.format(self.peer, message_length, len(self.data)))
             #     return
 
-    def _parse_message(self, message_id):
+    def _parse_message(self, message_id, payload):
         if message_id == 0:
             self.logger.debug('Peer {} sent CHOKE message'.format(self.peer))
+
         elif message_id == 1:
             self.logger.debug('Peer {} sent UNCHOKE message'.format(self.peer))
+
+            id = b'\x06'
+            message_length = bytes([0, 0, 0, 13])
+            index = random.choice(self.has_pieces)
+            piece_length = self.torrent.info['piece length']
+            request_length = 2**14
+            if piece_length % request_length == 0:
+                self.block_offset += 2**14
+            else:
+                if piece_length - self.block_offset < request_length:
+                    request_length = piece_length - self.block_offset
+                else:
+                    self.block_offset += 2**14
+
+            self.logger.info('block_offset: {}'.format(self.block_offset))
+            msg = b''.join([
+                message_length,
+                id,
+                struct.pack('!i', index),
+                struct.pack('!i', self.block_offset),
+                struct.pack('!i', request_length)
+                ])
+            self.logger.info('my request msg {}'.format(msg))
+            self.transport.write(msg)
+
         elif message_id == 2:
             self.logger.debug('Peer {} sent INTERESTED message'.format(self.peer))
+
         elif message_id == 3:
             self.logger.debug('Peer {} sent NOT INTERESTED message'.format(self.peer))
+
         elif message_id == 4:
             self.logger.debug('Peer {} sent HAVE message'.format(self.peer))
+            index = struct.unpack('!i', payload)[0]
+            self.logger.info('Peer {} has piece {}'.format(self.peer, index))
+            self.has_pieces[index] = True
+
         elif message_id == 5:
             self.logger.debug('Peer {} sent BITFIELD message'.format(self.peer))
+            self.has_pieces = BitArray(payload)
+
         elif message_id == 6:
             self.logger.debug('Peer {} sent REQUEST message'.format(self.peer))
+
         elif message_id == 7:
             self.logger.debug('Peer {} sent PIECE message'.format(self.peer))
+
         elif message_id == 8:
             self.logger.debug('Peer {} sent CANCEL message'.format(self.peer))
 
