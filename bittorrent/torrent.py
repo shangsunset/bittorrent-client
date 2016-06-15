@@ -1,3 +1,4 @@
+import math
 from random import choice
 from string import digits
 from hashlib import sha1
@@ -13,6 +14,7 @@ class Torrent():
         self.info_hash = sha1(bencode(self.info)).digest()
         self.peer_id = self.generate_peer_id()
         self.left = self.file_length()
+        self.number_of_pieces = self.number_of_pieces()
 
     def read_torrent_file(self, torrent_file):
         with open(torrent_file, 'rb') as f:
@@ -23,6 +25,9 @@ class Torrent():
         version = '0001'
         random_numbers = ''.join(choice(digits) for i in range(12))
         return '-{}{}-{}'.format(client_id, version, random_numbers)
+
+    def number_of_pieces(self):
+        return math.ceil(self.file_length() / self.info['piece length'])
 
     def file_length(self):
         length = 0

@@ -15,12 +15,12 @@ REQUEST_LENGTH = 2**14
 
 class PeerProtocol(asyncio.Protocol):
 
-    def __init__(self, torrent):
+    def __init__(self, torrent, piece_buffer):
         self.torrent = torrent
         self.logger = logging.getLogger('main.peer_protocol')
         self.data = bytes()
         self.has_pieces = []
-        self.pieces_requested = set()
+        self.piece_buffer = piece_buffer
 
     def connection_made(self, transport):
         # a tuple containing (host, port)
@@ -101,6 +101,8 @@ class PeerProtocol(asyncio.Protocol):
                 # self.logger.info('overflew data: {}, length: {}'.format(self.data[offset:], len(self.data[offset:])))
 
     def _parse_message(self, message_id, payload):
+        """ identity type of message sent from peer and make action accordingly """
+
         if message_id == 0:
             self.logger.debug('Peer {} sent CHOKE message'.format(self.peer))
 
@@ -115,12 +117,16 @@ class PeerProtocol(asyncio.Protocol):
             self.logger.debug('Peer {} sent NOT INTERESTED message'.format(self.peer))
 
         elif message_id == 4:
+            # peer tells what other pieces it has
+            # we need to update our record
             self.logger.debug('Peer {} sent HAVE message'.format(self.peer))
             index = struct.unpack('!i', payload)[0]
             self.logger.info('Peer {} has piece {}'.format(self.peer, index))
             self.has_pieces[index] = True
 
         elif message_id == 5:
+            # message payload is what pieces the peer has, labeled by indexes
+            # we need to keep a record of what the peer has
             self.logger.debug('Peer {} sent BITFIELD message'.format(self.peer))
             self.has_pieces = BitArray(payload)
 
@@ -129,6 +135,7 @@ class PeerProtocol(asyncio.Protocol):
 
         elif message_id == 7:
             self.logger.debug('Peer {} sent PIECE message'.format(self.peer))
+            self._handle_piece_msg(payload)
 
         elif message_id == 8:
             self.logger.debug('Peer {} sent CANCEL message'.format(self.peer))
@@ -137,6 +144,11 @@ class PeerProtocol(asyncio.Protocol):
         self.transport.close()
 
     def _send_request_msg(self):
+        """
+        if the peer has this piece, request it block by block.
+        last block of piece needs to calculated if piece cant
+        be evenly divided
+        """
         for index, piece in enumerate(self.has_pieces):
             if piece:
                 message_id = b'\x06'
@@ -145,33 +157,39 @@ class PeerProtocol(asyncio.Protocol):
                 request_length = REQUEST_LENGTH
 
                 # requesting a piece for a peer.
-                block_offset = 0
-                while block_offset < piece_length:
-                    # if piece_length can be evenly divided by REQUEST_LENGTH
-                    if piece_length % request_length == 0:
-                        block_offset += REQUEST_LENGTH
-                    else:
-                        if piece_length - block_offset < request_length:
-                            request_length = piece_length - block_offset
-                            # self.logger.info('this is last block of piece {}'.format(index))
-                        else:
-                            block_offset += REQUEST_LENGTH
+                begin_offset = 0
+                while begin_offset < piece_length:
 
-                    # self.logger.info('block_offset: {}'.format(block_offset))
-                    # self.logger.info('request from piece {}'.format(struct.pack('!i', index)))
-
-                    self.pieces_requested.add(index)
                     msg = b''.join([
                         message_length,
                         message_id,
                         struct.pack('!i', index),
-                        struct.pack('!i', block_offset),
+                        struct.pack('!i', begin_offset),
                         struct.pack('!i', request_length)
                         ])
-                    # self.logger.info('sending request to Peer {}'.format(self.peer))
                     self.transport.write(msg)
-            # else:
-            #     self.logger.info('Peer dont have this piece')
+
+                    # if piece_length can be evenly divided by REQUEST_LENGTH
+                    if piece_length % request_length == 0:
+                        begin_offset += REQUEST_LENGTH
+                    else:
+                        if piece_length - begin_offset < request_length:
+                            request_length = piece_length - begin_offset
+                            # self.logger.info('this is last block of piece {}'.format(index))
+                        else:
+                            begin_offset += REQUEST_LENGTH
+
+            else:
+                self.logger.info('Peer doesnt have this piece {}'.format(index))
+
+    def _handle_piece_msg(self, payload):
+        """ save block sent from peer """
+        index = struct.unpack('!i', payload[:4])[0]
+        begin_offset = struct.unpack('!i', payload[4:8])[0]
+        block = payload[9:]
+        has_piece = self.piece_buffer.save(index, begin_offset, block)
+        if has_piece:
+            self.logger.info('We have piece {}'.format(has_piece))
 
     def _hand_shake(self):
         """ https://wiki.theory.org/BitTorrentSpecification#Handshake """

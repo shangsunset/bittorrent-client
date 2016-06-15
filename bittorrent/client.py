@@ -1,4 +1,5 @@
 import struct
+import sys
 import asyncio
 import time
 import socket
@@ -7,6 +8,7 @@ import requests
 from bcoding import bdecode
 from torrent import Torrent
 from peer import PeerProtocol
+from utils import PieceBuffer
 
 
 class TorrentClient():
@@ -14,6 +16,7 @@ class TorrentClient():
     def __init__(self, torrent_file, loop):
         self.logger = logging.getLogger('main.torrent_client')
         self.torrent = Torrent(torrent_file)
+        self.piece_buffer = PieceBuffer(self.torrent)
         self.peers = self._discover_peers()
         self.loop = loop
 
@@ -76,7 +79,7 @@ class TorrentClient():
     async def _connect_to_peer(self, peer):
         try:
             await self.loop.create_connection(
-                    lambda: PeerProtocol(self.torrent),
+                    lambda: PeerProtocol(self.torrent, self.piece_buffer),
                     peer['host'],
                     peer['port']
                 )
@@ -85,7 +88,7 @@ class TorrentClient():
         except TimeoutError as e:
             pass
 
-    async def _connect_to_peers(self, future):
+    async def connect_to_peers(self, future):
         await asyncio.gather(
                 *[self._connect_to_peer(peer) for peer in self.peers],
                 loop=self.loop
