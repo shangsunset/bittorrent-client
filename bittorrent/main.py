@@ -26,6 +26,7 @@ def main():
     client = TorrentClient(filename, loop)
 
     asyncio.ensure_future(client.connect_to_peers(future))
+    # asyncio.ensure_future(client.keep_alive(future))
     future.add_done_callback(done)
 
     try:

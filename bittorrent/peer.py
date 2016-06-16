@@ -1,4 +1,6 @@
 import sys
+import datetime
+import time
 import asyncio
 import random
 import struct
@@ -15,12 +17,14 @@ REQUEST_LENGTH = 2**14
 
 class PeerProtocol(asyncio.Protocol):
 
-    def __init__(self, torrent, piece_buffer):
+    def __init__(self, torrent, data_buffer, blocks_requested, pieces_downloaded):
         self.torrent = torrent
         self.logger = logging.getLogger('main.peer_protocol')
         self.data = bytes()
         self.has_pieces = []
-        self.piece_buffer = piece_buffer
+        self.data_buffer = data_buffer
+        self.blocks_requested = blocks_requested
+        self.pieces_downloaded = pieces_downloaded
 
     def connection_made(self, transport):
         # a tuple containing (host, port)
@@ -28,6 +32,7 @@ class PeerProtocol(asyncio.Protocol):
         self.logger.info('connected with {}'.format(self.peer))
         transport.write(self._hand_shake())
         self.transport = transport
+        self.timer = datetime.datetime.now()
 
     def data_received(self, data):
         """
@@ -160,14 +165,20 @@ class PeerProtocol(asyncio.Protocol):
                 begin_offset = 0
                 while begin_offset < piece_length:
 
-                    msg = b''.join([
-                        message_length,
-                        message_id,
-                        struct.pack('!i', index),
-                        struct.pack('!i', begin_offset),
-                        struct.pack('!i', request_length)
-                        ])
-                    self.transport.write(msg)
+                    if begin_offset not in self.blocks_requested[index] and \
+                        not self.data_buffer.is_block_downloaded(
+                                index, begin_offset):
+
+                        msg = b''.join([
+                            message_length,
+                            message_id,
+                            struct.pack('!i', index),
+                            struct.pack('!i', begin_offset),
+                            struct.pack('!i', request_length)
+                            ])
+                        self.transport.write(msg)
+                        # self.logger.info('requesting block, index - {}, offset - {}'.format(index, begin_offset))
+                        self.blocks_requested[index].append(begin_offset)
 
                     # if piece_length can be evenly divided by REQUEST_LENGTH
                     if piece_length % request_length == 0:
@@ -182,14 +193,24 @@ class PeerProtocol(asyncio.Protocol):
             else:
                 self.logger.info('Peer doesnt have this piece {}'.format(index))
 
-    def _handle_piece_msg(self, payload):
-        """ save block sent from peer """
-        index = struct.unpack('!i', payload[:4])[0]
-        begin_offset = struct.unpack('!i', payload[4:8])[0]
-        block = payload[9:]
-        has_piece = self.piece_buffer.save(index, begin_offset, block)
-        if has_piece:
-            self.logger.info('We have piece {}'.format(has_piece))
+    def _handle_piece_msg(self, message_payload):
+        """ save blocks sent from peer """
+
+        index = struct.unpack('!i', message_payload[:4])[0]
+        begin_offset = struct.unpack('!i', message_payload[4:8])[0]
+        block = message_payload[8:]
+
+        downloaded_piece_index = self.data_buffer.save(index, begin_offset, block)
+
+        if downloaded_piece_index:
+            self.pieces_downloaded.append(index)
+            self.logger.info('We have piece {}'.format(downloaded_piece_index))
+            self.logger.info('pieces downloaded: {}'.format(self.pieces_downloaded))
+
+    async def send_keepalive_msg(self):
+        await self.transport.write(KEEPALIVE)
+        self.logger.info('SENDING KEEP ALIVEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE')
+
 
     def _hand_shake(self):
         """ https://wiki.theory.org/BitTorrentSpecification#Handshake """

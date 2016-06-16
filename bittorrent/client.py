@@ -8,7 +8,7 @@ import requests
 from bcoding import bdecode
 from torrent import Torrent
 from peer import PeerProtocol
-from utils import PieceBuffer
+from utils import DataBuffer
 
 
 class TorrentClient():
@@ -16,7 +16,11 @@ class TorrentClient():
     def __init__(self, torrent_file, loop):
         self.logger = logging.getLogger('main.torrent_client')
         self.torrent = Torrent(torrent_file)
-        self.piece_buffer = PieceBuffer(self.torrent)
+        # save downloaded pieces
+        self.data_buffer = DataBuffer(self.torrent)
+        # keep track blocks that are requested
+        self.blocks_requested = {index: [] for index in range(self.torrent.number_of_pieces)}
+        self.pieces_downloaded = []
         self.peers = self._discover_peers()
         self.loop = loop
 
@@ -78,11 +82,19 @@ class TorrentClient():
 
     async def _connect_to_peer(self, peer):
         try:
-            await self.loop.create_connection(
-                    lambda: PeerProtocol(self.torrent, self.piece_buffer),
-                    peer['host'],
-                    peer['port']
-                )
+            asyncio.open_connection(peer['host'], peer['port'])
+            # pp = PeerProtocol(
+            #         self.torrent,
+            #         self.data_buffer,
+            #         self.blocks_requested,
+            #         self.pieces_downloaded
+            #         )
+            # await self.loop.create_connection(
+            #         lambda: pp,
+            #         peer['host'],
+            #         peer['port']
+            #     )
+            # self.protocols.append(pp)
         except ConnectionRefusedError as e:
             self.logger.info(e)
         except TimeoutError as e:
@@ -96,6 +108,11 @@ class TorrentClient():
 
         future.set_result('future is done!')
 
+    # async def keep_alive(self, future):
+    #     await asyncio.gather(
+    #             *[protocol.send_keepalive_msg() for protocol in self.protocols],
+    #             loop=self.loop
+    #             )
         # return [
         #     asyncio.ensure_future(
         #         self.connect_to_peer(peer)
