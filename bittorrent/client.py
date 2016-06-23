@@ -123,6 +123,7 @@ class TorrentClient():
 
         except (ConnectionRefusedError,
                 ConnectionResetError,
+                ConnectionAbortedError,
                 TimeoutError, OSError) as e:
             self.logger.error('{}, {}'.format(e, peer.ip))
 
@@ -156,14 +157,34 @@ class TorrentClient():
         while True:
 
             message_body = b''
+            first_4_bytes = b''
             # if complete_message:
-            try:
-                chunk = await peer.reader.readexactly(4)
-            except asyncio.IncompleteReadError as e:
-                self.logger.error(e)
-                break
+            # try:
+            while len(first_4_bytes) < 4:
+                self.logger.info('getting message length')
+                try:
+                    chunk = await peer.reader.read(4 - len(first_4_bytes))
+                except IOError as e:
+                    self.logger.info('IOError: {}'.format(e))
+                except Exception as exc:
+                    self.logger.info(exc)
 
-            message_length = struct.unpack('!i', chunk)[0]
+                if not chunk:
+                    self.logger.info('no bytes read')
+                    return
+                first_4_bytes += chunk
+                self.logger.info(first_4_bytes)
+
+            # except asyncio.IncompleteReadError as e:
+                # self.logger.error(e)
+                # break
+
+            try:
+                message_length = struct.unpack('!i', first_4_bytes)[0]
+            except struct.error as e:
+                self.logger.info(message_length)
+                sys.exit()
+
 
             if message_length == 0:
                 self.logger.debug('Peer {} sent KEEP ALIVE message'.format(peer.ip))
@@ -171,26 +192,23 @@ class TorrentClient():
             else:
 
                 while len(message_body) < message_length:
-                    # message_body_chunk = b''
-                    # message_body_chunk = await peer.reader.read()
-                    # self.logger.info(message_body_chunk)
-                    # message_body += message_body_chunk
-
-                    try:
-                        self.logger.info('reading chunk in length: {}...'.format(message_length - len(message_body)))
-                        message_body_chunk = await peer.reader.readexactly(message_length - len(message_body))
-                        self.logger.info('message body chunk len {}'.format(len(message_body_chunk)))
-                        message_body += message_body_chunk
-                    except asyncio.IncompleteReadError as e:
-                        if len(e.partial) > 0:
-                            partial_message = e.partial
-                            self.logger.info('partial message body len {}, partial: {}'.format(len(partial_message), partial_message))
-                            message_body += partial_message
-                            self.logger.info('len of message_body: {}, message_length: {}'.format(len(message_body), message_length))
-                            time.sleep(10)
-
-                            self.logger.info('need {} more, have {}'.format(message_length - len(message_body), len(message_body)))
-                            self.logger.info('message body chunk len {}'.format(len(message_body_chunk)))
+                    # try:
+                    self.logger.info('reading chunk in length: {}...'.format(message_length - len(message_body)))
+                    message_body_chunk = await peer.reader.read(message_length - len(message_body))
+                    if not message_body_chunk:
+                        return
+                    # self.logger.info('message body chunk {}'.format(message_body_chunk))
+                    message_body += message_body_chunk
+                    # except asyncio.IncompleteReadError as e:
+                    #     if len(e.partial) > 0:
+                    #         partial_message = e.partial
+                    #         self.logger.info('partial message body len {}, partial: {}'.format(len(partial_message), partial_message))
+                    #         message_body += partial_message
+                    #         self.logger.info('len of message_body: {}, message_length: {}'.format(len(message_body), message_length))
+                    #         time.sleep(10)
+                    #
+                    #         self.logger.info('need {} more, have {}'.format(message_length - len(message_body), len(message_body)))
+                    #         self.logger.info('message body chunk len {}'.format(len(message_body_chunk)))
 
                 message_id = message_body[0]
                 payload = message_body[1:]

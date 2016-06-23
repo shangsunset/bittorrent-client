@@ -22,6 +22,7 @@ class Peer():
         self._writer = None
         self._ip = {'host': host, 'port': port}
         self.has_pieces = []
+        self.temp_buffer = BitArray()
 
     @property
     def ip(self):
