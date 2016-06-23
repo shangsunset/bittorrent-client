@@ -15,6 +15,34 @@ NOT_INTERESTED = bytes([0, 0, 0, 1]) + bytes([3])
 
 REQUEST_LENGTH = 2**14
 
+class Peer():
+
+    def __init__(self, host, port):
+        self._reader = None
+        self._writer = None
+        self._ip = {'host': host, 'port': port}
+        self.has_pieces = []
+
+    @property
+    def ip(self):
+        return self._ip
+
+    @property
+    def reader(self):
+        return self._reader
+
+    @property
+    def writer(self):
+        return self._writer
+
+    @reader.setter
+    def reader(self, reader):
+        self._reader = reader
+
+    @writer.setter
+    def writer(self, writer):
+        self._writer = writer
+
 class PeerProtocol(asyncio.Protocol):
 
     def __init__(self, torrent, data_buffer, blocks_requested, pieces_downloaded):
@@ -35,12 +63,6 @@ class PeerProtocol(asyncio.Protocol):
         self.timer = datetime.datetime.now()
 
     def data_received(self, data):
-        """
-        info hash looks something like:
-        b'\x13BitTorrent protocol\x00\x00\x00\x00\x00\x00
-        \x00\x00#\xb0\x93\x9ez\xc8\xb9\xb0\x1c\xda\xf0\x1f
-        \x98\x8b\x9f\xfb\xbeD\xdd\xe2-AS0001-059505862275'
-        """
 
         # existing message buffer
         # if self.data:

@@ -1,6 +1,7 @@
 import math
+import logging
 from random import choice
-from string import digits
+from string import digits, ascii_letters
 from hashlib import sha1
 from bcoding import bdecode, bencode
 
@@ -8,6 +9,7 @@ from bcoding import bdecode, bencode
 class Torrent():
 
     def __init__(self, torrent_file):
+        self.logger = logging.getLogger('main.torrent')
         self.metainfo = self.read_torrent_file(torrent_file)
         self.tracker_url = self.metainfo['announce']
         self.info = self.metainfo['info']
@@ -23,7 +25,7 @@ class Torrent():
     def generate_peer_id(self):
         client_id = 'AS'
         version = '0001'
-        random_numbers = ''.join(choice(digits) for i in range(12))
+        random_numbers = ''.join(choice(ascii_letters + digits) for i in range(12))
         return '-{}{}-{}'.format(client_id, version, random_numbers)
 
     def number_of_pieces(self):
