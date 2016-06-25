@@ -18,10 +18,11 @@ logger.addHandler(fh)
 logger.addHandler(ch)
 
 def main():
-    filename = '../street-fighter.torrent'
+    filename = '../left-4-live.torrent'
     client = TorrentClient(filename, loop)
 
     asyncio.ensure_future(client.connect_to_peers())
+    asyncio.ensure_future(client.send_keepalive())
 
     try:
         loop.run_forever()

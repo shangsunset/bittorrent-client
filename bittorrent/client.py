@@ -4,6 +4,7 @@ import asyncio
 import time
 import socket
 import logging
+import datetime
 
 import requests
 from bcoding import bdecode
@@ -32,6 +33,7 @@ class TorrentClient():
         self.blocks_requested = {index: [] for index in range(self.torrent.number_of_pieces)}
         self.pieces_downloaded = []
         self.peers = self._discover_peers()
+        self.active_peers = []
         self.loop = loop
 
     def _discover_peers(self):
@@ -112,6 +114,24 @@ class TorrentClient():
                 *[self._connect_to_peer(peer) for peer in self.peers],
                 )
 
+    async def send_keepalive(self):
+        self.logger.info('look here')
+        self.logger.info(self.active_peers)
+        await asyncio.gather(
+                *[self._send_keepalive_to_peer(peer) for peer in self.peers],
+                )
+
+    async def _send_keepalive_to_peer(self, peer):
+        while True:
+            await asyncio.sleep(120)
+            if peer in self.active_peers:
+                self.logger.info('now sending keep alive message to peer...'.format(peer.ip))
+
+                try:
+                    peer.writer.write(KEEPALIVE)
+                except Exception as e:
+                    self.logger.info(e)
+
     async def _connect_to_peer(self, peer):
 
         try:
@@ -136,6 +156,8 @@ class TorrentClient():
 
     async def _connection_handler(self, peer):
         self.logger.info('connected with peer {}'.format(peer.ip))
+        self.active_peers.append(peer)
+        self.timer = datetime.datetime.now()
         peer.writer.write(self._hand_shake())
 
         try:
@@ -161,7 +183,6 @@ class TorrentClient():
             # if complete_message:
             # try:
             while len(first_4_bytes) < 4:
-                self.logger.info('getting message length')
                 try:
                     chunk = await peer.reader.read(4 - len(first_4_bytes))
                 except IOError as e:
@@ -170,10 +191,8 @@ class TorrentClient():
                     self.logger.info(exc)
 
                 if not chunk:
-                    self.logger.info('no bytes read')
                     return
                 first_4_bytes += chunk
-                self.logger.info(first_4_bytes)
 
             # except asyncio.IncompleteReadError as e:
                 # self.logger.error(e)
@@ -187,13 +206,12 @@ class TorrentClient():
 
 
             if message_length == 0:
+                peer.timer = datetime.datetime.now()
                 self.logger.debug('Peer {} sent KEEP ALIVE message'.format(peer.ip))
-                continue
             else:
 
                 while len(message_body) < message_length:
                     # try:
-                    self.logger.info('reading chunk in length: {}...'.format(message_length - len(message_body)))
                     message_body_chunk = await peer.reader.read(message_length - len(message_body))
                     if not message_body_chunk:
                         return
