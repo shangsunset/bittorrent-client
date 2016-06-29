@@ -209,7 +209,6 @@ class PeerProtocol(asyncio.Protocol):
                     else:
                         if piece_length - begin_offset < request_length:
                             request_length = piece_length - begin_offset
-                            # self.logger.info('this is last block of piece {}'.format(index))
                         else:
                             begin_offset += REQUEST_LENGTH
 

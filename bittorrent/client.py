@@ -114,23 +114,25 @@ class TorrentClient():
                 *[self._connect_to_peer(peer) for peer in self.peers],
                 )
 
-    async def send_keepalive(self):
-        self.logger.info('look here')
-        self.logger.info(self.active_peers)
+    async def keep_alive(self):
         await asyncio.gather(
                 *[self._send_keepalive_to_peer(peer) for peer in self.peers],
                 )
 
     async def _send_keepalive_to_peer(self, peer):
         while True:
-            await asyncio.sleep(120)
+            await asyncio.sleep(90)
             if peer in self.active_peers:
-                self.logger.info('now sending keep alive message to peer...'.format(peer.ip))
-
                 try:
                     peer.writer.write(KEEPALIVE)
-                except Exception as e:
-                    self.logger.info(e)
+                    self.logger.info('just sent keep alive message to {}'.format(peer.ip))
+                except (IOError, TimeoutError, Exception) as e:
+                    self.logger.error('keep live: {}'.format(e))
+                    if e == 'Connection lost':
+                        self.active_peers.remove(peer)
+                        self.logger.info('connected peers: {}'.format(self.active_peers))
+
+                    break
 
     async def _connect_to_peer(self, peer):
 
@@ -141,69 +143,64 @@ class TorrentClient():
             peer.reader = reader
             peer.writer = writer
 
+            await self._connection_handler(peer)
         except (ConnectionRefusedError,
                 ConnectionResetError,
                 ConnectionAbortedError,
                 TimeoutError, OSError) as e:
             self.logger.error('{}, {}'.format(e, peer.ip))
 
-        else:
-            try:
-                await self._connection_handler(peer)
-            except ConnectionResetError as e:
-                self.logger.error(e)
-                time.sleep(10)
 
     async def _connection_handler(self, peer):
         self.logger.info('connected with peer {}'.format(peer.ip))
         self.active_peers.append(peer)
         self.timer = datetime.datetime.now()
         peer.writer.write(self._hand_shake())
-
         try:
-            chunk = await peer.reader.readexactly(68)
-        except asyncio.IncompleteReadError as e:
-            self.logger.error(e)
+            await peer.writer.drain()
+        except (IOError, Exception) as e:
+            self.logger.error('hand shake: {}'.format(e))
 
-        info_hash = chunk[28:48]
-        if self.torrent.info_hash != info_hash:
-            self._close_connection(peer)
-        else:
-            peer.writer.write(INTERESTED)
-            self.logger.info('Sent INTERESTED message to Peer {}'.format(peer.ip))
+        hand_shake_msg = b''
 
-        await self._read_from_peer(peer)
+        while len(hand_shake_msg) < 68:
+        # 68 is the length of hand shake message
+            try:
+                chunk = await peer.reader.read(68)
+                hand_shake_msg += chunk
+                if not chunk:
+                    break
+                info_hash = hand_shake_msg[28:48]
+                if self.torrent.info_hash != info_hash:
+                    self._close_connection(peer)
+                else:
+                    peer.writer.write(INTERESTED)
+                    await peer.writer.drain()
+                    self.logger.info('Sent INTERESTED message to Peer {}'.format(peer.ip))
+
+                await self._read_from_peer(peer)
+            except (Exception, IOError, ConnectionResetError) as e:
+                self.logger.info('read hand shake: {}'.format(e))
+                break
+
 
     async def _read_from_peer(self, peer):
-
         while True:
 
             message_body = b''
             first_4_bytes = b''
-            # if complete_message:
-            # try:
             while len(first_4_bytes) < 4:
                 try:
                     chunk = await peer.reader.read(4 - len(first_4_bytes))
-                except IOError as e:
-                    self.logger.info('IOError: {}'.format(e))
-                except Exception as exc:
-                    self.logger.info(exc)
+                except (IOError, TimeoutError, Exception) as e:
+                    self.logger.error('read from peer Exception: {}'.format(e))
+                    return
 
                 if not chunk:
                     return
                 first_4_bytes += chunk
 
-            # except asyncio.IncompleteReadError as e:
-                # self.logger.error(e)
-                # break
-
-            try:
-                message_length = struct.unpack('!i', first_4_bytes)[0]
-            except struct.error as e:
-                self.logger.info(message_length)
-                sys.exit()
-
+            message_length = struct.unpack('!i', first_4_bytes)[0]
 
             if message_length == 0:
                 peer.timer = datetime.datetime.now()
@@ -211,47 +208,18 @@ class TorrentClient():
             else:
 
                 while len(message_body) < message_length:
-                    # try:
-                    message_body_chunk = await peer.reader.read(message_length - len(message_body))
+                    try:
+                        message_body_chunk = await peer.reader.read(message_length - len(message_body))
+                    except (Exception, IOError) as e:
+                        self.logger.info('read message body: {}'.format(e))
+                        return
                     if not message_body_chunk:
                         return
-                    # self.logger.info('message body chunk {}'.format(message_body_chunk))
                     message_body += message_body_chunk
-                    # except asyncio.IncompleteReadError as e:
-                    #     if len(e.partial) > 0:
-                    #         partial_message = e.partial
-                    #         self.logger.info('partial message body len {}, partial: {}'.format(len(partial_message), partial_message))
-                    #         message_body += partial_message
-                    #         self.logger.info('len of message_body: {}, message_length: {}'.format(len(message_body), message_length))
-                    #         time.sleep(10)
-                    #
-                    #         self.logger.info('need {} more, have {}'.format(message_length - len(message_body), len(message_body)))
-                    #         self.logger.info('message body chunk len {}'.format(len(message_body_chunk)))
 
                 message_id = message_body[0]
                 payload = message_body[1:]
                 await self._parse_message(peer, message_id, payload)
-            # else:
-            #     self.logger.info('finishing remaining message')
-            #     self.logger.info('need {} more, have {}'.format(message_length - len(message_body), len(message_body)))
-            #     time.sleep(10)
-            #     try:
-            #         remaining_chunk = await peer.reader.readexactly(message_length - len(message_body))
-            #     except asyncio.IncompleteReadError as e:
-            #         sys.exit()
-            #     self.logger.info('len of remaining chunk: {}, need {}'.format(len(remaining_chunk), len(message_length) - len(message_body)))
-            #     time.sleep(10)
-            #     message_body += remaining_chunk
-            #     if len(message_body) == message_length:
-            #         complete_message = True
-
-            # if complete_message:
-            #     self.logger.info('message complete')
-            #     message_id = message_body[0]
-            #     payload = message_body[1:]
-            #     await self._parse_message(peer, message_id, payload)
-            #     message_length = 0
-            #     message_body = b''
 
     async def _parse_message(self, peer, msg_id, payload):
         """ identity type of message sent from peer and make action accordingly """
@@ -299,20 +267,21 @@ class TorrentClient():
         last block of piece needs to calculated if piece cant
         be evenly divided
         """
+        i = 0
+        total_length = 0
         for index, piece in enumerate(peer.has_pieces):
             if piece:
+                i += 1
                 message_id = b'\x06'
                 message_length = bytes([0, 0, 0, 13])
                 piece_length = self.torrent.info['piece length']
                 request_length = REQUEST_LENGTH
 
-                # requesting a piece for a peer.
+                # requesting a piece from a peer.
                 begin_offset = 0
                 while begin_offset < piece_length:
 
-                    if begin_offset not in self.blocks_requested[index] and \
-                        not self.data_buffer.is_block_downloaded(
-                                index, begin_offset):
+                    if begin_offset not in self.blocks_requested[index]:
 
                         msg = b''.join([
                             message_length,
@@ -321,21 +290,33 @@ class TorrentClient():
                             struct.pack('!i', begin_offset),
                             struct.pack('!i', request_length)
                             ])
-                        peer.writer.write(msg)
-                        await peer.writer.drain()
+
+                        try:
+                            peer.writer.write(msg)
+                            await peer.writer.drain()
+                        except (IOError, TimeoutError, Exception) as e:
+                            self.logger.error('send request: {}'.format(e))
+                            break
                         self.blocks_requested[index].append(begin_offset)
 
                     # if piece_length can be evenly divided by REQUEST_LENGTH
                     if piece_length % request_length == 0:
-                        begin_offset += REQUEST_LENGTH
+                        begin_offset += request_length
                     else:
                         if piece_length - begin_offset < request_length:
                             request_length = piece_length - begin_offset
-                            # self.logger.info('this is last block of piece {}'.format(index))
+                            self.logger.info('this is last block of piece {}, requested length is {}'.format(index, piece_length - begin_offset))
                         else:
                             begin_offset += REQUEST_LENGTH
+
+                    total_length += request_length
+                    self.logger.info('total length requested {}'.format(total_length))
             else:
                 self.logger.info('Peer doesnt have this piece {}'.format(index))
+        self.logger.info('done requesting picese from {}, peer has {} pieces, total length {}'.format(peer.ip, i, total_length))
+        time.sleep(20)
+        self.logger.info(self.torrent.file_length())
+
 
     def _handle_piece_msg(self, message_payload):
         """ save blocks sent from peer """
@@ -344,18 +325,19 @@ class TorrentClient():
         begin_offset = struct.unpack('!i', message_payload[4:8])[0]
         block = message_payload[8:]
 
-        downloaded_piece_index = self.data_buffer.save(index, begin_offset, block)
+        self.logger.debug('saving block for piece {}'.format(index))
+        try:
+            downloaded_piece_index = self.data_buffer.save(index, begin_offset, block)
+        except Exception as e:
+            self.logger.error('save to buffer: {}'.format(e))
+        self.logger.info('saved the block the buffer')
 
-        if downloaded_piece_index:
+        if downloaded_piece_index is not None:
             self.pieces_downloaded.append(index)
             self.logger.info('We have piece {}'.format(downloaded_piece_index))
-            self.logger.info('pieces downloaded: {}'.format(self.pieces_downloaded))
+            self.logger.info('how many now: {}, total: {}'.format(len(self.pieces_downloaded), self.torrent.number_of_pieces))
+
 
     def _close_connection(self, peer):
-        self.logger.info('info hash doesnt match with {}. connection closed...'.format(peer.ip))
+        self.active_peers.remove(peer)
         peer.writer.close()
-    # async def keep_alive(self, future):
-    #     await asyncio.gather(
-    #             *[protocol.send_keepalive_msg() for protocol in self.protocols],
-    #             loop=self.loop
-    #             )
