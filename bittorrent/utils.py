@@ -28,8 +28,10 @@ class DataBuffer():
         self.logger.info(self.torrent.file_length())
         if piece_length == len(self.buffer[index]):
             return index
-
-        return None
+        elif self.torrent.file_length() == self.__len__():
+            return index
+        else:
+            return None
 
     def is_block_downloaded(self, index, begin_offset):
         if not self.buffer[index][begin_offset:]:

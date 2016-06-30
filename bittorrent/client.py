@@ -279,7 +279,8 @@ class TorrentClient():
 
                 # requesting a piece from a peer.
                 begin_offset = 0
-                while begin_offset < piece_length:
+                while begin_offset < piece_length and \
+                        total_length < self.torrent.file_length():
 
                     if begin_offset not in self.blocks_requested[index]:
 
@@ -291,6 +292,9 @@ class TorrentClient():
                             struct.pack('!i', request_length)
                             ])
 
+                        total_length += request_length
+                        self.logger.info('index: {}, begin offset: {}, request length: {}, total length requested {}'.format(index, begin_offset, request_length, total_length))
+
                         try:
                             peer.writer.write(msg)
                             await peer.writer.drain()
@@ -299,18 +303,19 @@ class TorrentClient():
                             break
                         self.blocks_requested[index].append(begin_offset)
 
-                    # if piece_length can be evenly divided by REQUEST_LENGTH
-                    if piece_length % request_length == 0:
-                        begin_offset += request_length
+                    if self.torrent.file_length() - total_length < request_length:
+                        request_length = self.torrent.file_length() - total_length
                     else:
-                        if piece_length - begin_offset < request_length:
-                            request_length = piece_length - begin_offset
-                            self.logger.info('this is last block of piece {}, requested length is {}'.format(index, piece_length - begin_offset))
+                        # if piece_length can be evenly divided by REQUEST_LENGTH
+                        if piece_length % request_length == 0:
+                            begin_offset += request_length
                         else:
-                            begin_offset += REQUEST_LENGTH
+                            if piece_length - begin_offset < request_length:
+                                request_length = piece_length - begin_offset
+                                self.logger.info('this is last block of piece {}, requested length is {}'.format(index, piece_length - begin_offset))
+                            else:
+                                begin_offset += REQUEST_LENGTH
 
-                    total_length += request_length
-                    self.logger.info('total length requested {}'.format(total_length))
             else:
                 self.logger.info('Peer doesnt have this piece {}'.format(index))
         self.logger.info('done requesting picese from {}, peer has {} pieces, total length {}'.format(peer.ip, i, total_length))
