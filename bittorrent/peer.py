@@ -5,7 +5,9 @@ import asyncio
 import random
 import struct
 import logging
+
 from bitstring import BitArray
+from utils import PieceQueue
 
 KEEPALIVE = bytes([0, 0, 0, 0])
 CHOKE = bytes([0, 0, 0, 1]) + bytes([0])
@@ -17,16 +19,17 @@ REQUEST_LENGTH = 2**14
 
 class Peer():
 
-    def __init__(self, host, port):
+    def __init__(self, host, port, torrent):
         self._reader = None
         self._writer = None
-        self._ip = {'host': host, 'port': port}
-        self.has_pieces = []
+        self._address = {'host': host, 'port': port}
+        self.job_queue = PieceQueue(torrent)
         self.timer = datetime.datetime.now()
 
+
     @property
-    def ip(self):
-        return self._ip
+    def address(self):
+        return self._address
 
     @property
     def reader(self):
@@ -46,14 +49,14 @@ class Peer():
 
 class PeerProtocol(asyncio.Protocol):
 
-    def __init__(self, torrent, data_buffer, blocks_requested, pieces_downloaded):
+    def __init__(self, torrent):
         self.torrent = torrent
         self.logger = logging.getLogger('main.peer_protocol')
         self.data = bytes()
-        self.has_pieces = []
-        self.data_buffer = data_buffer
-        self.blocks_requested = blocks_requested
-        self.pieces_downloaded = pieces_downloaded
+        # self.has_pieces = []
+        # self.data_buffer = data_buffer
+        # self.blocks_requested = blocks_requested
+        # self.pieces_downloaded = pieces_downloaded
 
     def connection_made(self, transport):
         # a tuple containing (host, port)
@@ -65,15 +68,7 @@ class PeerProtocol(asyncio.Protocol):
 
     def data_received(self, data):
 
-        # existing message buffer
-        # if self.data:
-            # self.logger.info('existing buffer from {}: {}'.format(self.peer, self.data))
-            # self.data += data
-            # self.logger.info('conactenated buffer from {}: {}'.format(self.peer, self.data))
-        # else:
-        #     self.data = data
-            # self.logger.info('new buffer from {}: {}'.format(self.peer, self.data))
-
+        # check if the data is a handshake message
         if data[1:20].lower() == b'bittorrent protocol':
             # info hash is 20 bytes long
             received_info_hash = data[28:48]
@@ -97,7 +92,6 @@ class PeerProtocol(asyncio.Protocol):
         else:
             self.data = data
 
-        # self.logger.info(self.data)
         while len(self.data) > 4:
             offset = 0
             try:
@@ -105,30 +99,26 @@ class PeerProtocol(asyncio.Protocol):
             except struct.error as e:
                 self.logger.info(e)
                 self.logger.info('data: {}, data[0:4]: {}, length: {}'.format(self.data, self.data[0:4], len(self.data[0:4])))
-                sys.exit()
 
             offset += 4
-            # self.logger.info('from Peer {}, message length {}, {}'.format(self.peer, message_length, self.data))
             if len(self.data) - offset < message_length:
-                # self.logger.info('need more data, message length: {}, data length: {}'.format(message_length, len(self.data)))
-                # self.logger.info('data: {}'.format(self.data))
+                # not enough data to form a message,
+                # return to wait for more data
                 return
             elif message_length == 0:
                 self.logger.debug('Peer {} sent KEEP ALIVE message'.format(self.peer))
                 return
             else:
-                # self.logger.info('enough data collected, message length: {}, data length: {}, offset: {}'.format(message_length, len(self.data), offset))
-                # self.logger.info('data: {}'.format(self.data))
+                # a whole message is collected, handle it
                 message_id = self.data[offset]
                 payload = self.data[offset+1:offset+message_length] if message_length > 1 else None
 
-                self._parse_message(message_id, payload)
+                self._message_handler(message_id, payload)
 
                 offset += message_length
                 self.data = self.data[offset:]
-                # self.logger.info('overflew data: {}, length: {}'.format(self.data[offset:], len(self.data[offset:])))
 
-    def _parse_message(self, message_id, payload):
+    def _message_handler(self, message_id, payload):
         """ identity type of message sent from peer and make action accordingly """
 
         if message_id == 0:
@@ -136,7 +126,7 @@ class PeerProtocol(asyncio.Protocol):
 
         elif message_id == 1:
             self.logger.debug('Peer {} sent UNCHOKE message'.format(self.peer))
-            self._send_request_msg()
+            # self._send_request_msg()
 
         elif message_id == 2:
             self.logger.debug('Peer {} sent INTERESTED message'.format(self.peer))
@@ -148,22 +138,22 @@ class PeerProtocol(asyncio.Protocol):
             # peer tells what other pieces it has
             # we need to update our record
             self.logger.debug('Peer {} sent HAVE message'.format(self.peer))
-            index = struct.unpack('!i', payload)[0]
-            self.logger.info('Peer {} has piece {}'.format(self.peer, index))
-            self.has_pieces[index] = True
+            # index = struct.unpack('!i', payload)[0]
+            # self.logger.info('Peer {} has piece {}'.format(self.peer, index))
+            # self.has_pieces[index] = True
 
         elif message_id == 5:
             # message payload is what pieces the peer has, labeled by indexes
             # we need to keep a record of what the peer has
             self.logger.debug('Peer {} sent BITFIELD message'.format(self.peer))
-            self.has_pieces = BitArray(payload)
+            # self.has_pieces = BitArray(payload)
 
         elif message_id == 6:
             self.logger.debug('Peer {} sent REQUEST message'.format(self.peer))
 
         elif message_id == 7:
             self.logger.debug('Peer {} sent PIECE message'.format(self.peer))
-            self._handle_piece_msg(payload)
+            # self._handle_piece_msg(payload)
 
         elif message_id == 8:
             self.logger.debug('Peer {} sent CANCEL message'.format(self.peer))
@@ -228,11 +218,6 @@ class PeerProtocol(asyncio.Protocol):
             self.pieces_downloaded.append(index)
             self.logger.info('We have piece {}'.format(downloaded_piece_index))
             self.logger.info('pieces downloaded: {}'.format(self.pieces_downloaded))
-
-    async def send_keepalive_msg(self):
-        await self.transport.write(KEEPALIVE)
-        self.logger.info('SENDING KEEP ALIVEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE')
-
 
     def _hand_shake(self):
         """ https://wiki.theory.org/BitTorrentSpecification#Handshake """
