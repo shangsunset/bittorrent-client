@@ -20,7 +20,6 @@ UNCHOKE = bytes([0, 0, 0, 1]) + bytes([1])
 INTERESTED = bytes([0, 0, 0, 1]) + bytes([2])
 NOT_INTERESTED = bytes([0, 0, 0, 1]) + bytes([3])
 
-REQUEST_LENGTH = 2**14
 
 class TorrentClient():
 
@@ -30,7 +29,6 @@ class TorrentClient():
         # save downloaded pieces
         self.pieces = Pieces(self.torrent)
         # keep track blocks that are requested
-        self.blocks_requested = {index: [] for index in range(self.torrent.number_of_pieces)}
         self.pieces_downloaded = []
         self.peers = self._discover_peers()
         self.active_peers = []
@@ -240,7 +238,8 @@ class TorrentClient():
 
         elif msg_id == 1:
             self.logger.debug('Peer {} sent UNCHOKE message'.format(peer.address))
-            # await self._request_piece(peer)
+            peer.choked = False
+            await self._request_piece(peer)
 
         elif msg_id == 2:
             self.logger.debug('Peer {} sent INTERESTED message'.format(peer.address))
@@ -253,59 +252,59 @@ class TorrentClient():
             # we need to update our record
             self.logger.debug('Peer {} sent HAVE message'.format(peer.address))
             index = struct.unpack('!i', payload)[0]
-            no_pieces = len(peer.job_queue) == 0
-            peer.job_queue.add(index)
+            no_pieces = len(peer.queue) == 0
+            peer.queue.add(index)
             if no_pieces:
-                self._request_piece(peer)
+                await self._request_piece(peer)
 
         elif msg_id == 5:
             # message payload is what pieces the peer has, labeled by indexes
             # we need to keep a record of what the peer has
             self.logger.debug('Peer {} sent BITFIELD message'.format(peer.address))
-            no_pieces = len(peer.job_queue) == 0
+            no_pieces = len(peer.queue) == 0
             # peer.pieces = BitArray(payload)
             b = bytearray(payload)
             bitstring = ''.join([bin(x)[2:] for x in b])
             pieces_indexes = [i for i, x in enumerate(bitstring) if x == '1']
             for index in pieces_indexes:
-                peer.job_queue.add(index)
+                peer.queue.add(index)
 
             if no_pieces:
-                self._request_piece(peer)
+                await self._request_piece(peer)
 
         elif msg_id == 6:
             self.logger.debug('Peer {} sent REQUEST message'.format(peer.address))
 
         elif msg_id == 7:
             # self.logger.debug('Peer {} sent PIECE message'.format(peer.address))
-            self._handle_piece_msg(payload, peer)
+            await self._handle_piece_msg(payload, peer)
 
         elif msg_id == 8:
             self.logger.debug('Peer {} sent CANCEL message'.format(peer.address))
 
-    def _request_message(self, index, begin_offset, request_length):
+    def _request_message(self, block):
         message_id = b'\x06'
         message_length = bytes([0, 0, 0, 13])
         piece_length = self.torrent.info['piece length']
-        request_length = REQUEST_LENGTH
+        request_length = self.torrent.REQUEST_LENGTH
 
-        total_file_length = 0
-        begin_offset = 0
-        while begin_offset < piece_length and \
-            total_file_length < self.torrent.file_length():
+        # total_file_length = 0
+        # begin_offset = 0
+        # while begin_offset < piece_length and \
+        #     total_file_length < self.torrent.file_length():
 
-            msg = b''.join([
-                message_length,
-                message_id,
-                struct.pack('!i', index),
-                struct.pack('!i', begin_offset),
-                struct.pack('!i', request_length)
-                ])
-            total_file_length += request_length
+        msg = b''.join([
+            message_length,
+            message_id,
+            struct.pack('!i', block['index']),
+            struct.pack('!i', block['begin_offset']),
+            struct.pack('!i', block['request_length'])
+            ])
+        # total_file_length += request_length
 
         return msg
 
-    def _request_piece(self, peer):
+    async def _request_piece(self, peer):
         """
         if the peer has this piece, request it block by block.
         last block of piece needs to calculated if piece cant
@@ -324,7 +323,7 @@ class TorrentClient():
                         # message_id = b'\x06'
                         # message_length = bytes([0, 0, 0, 13])
                         # piece_length = self.torrent.info['piece length']
-                        # request_length = REQUEST_LENGTH
+                        # request_length = self.torrent.REQUEST_LENGTH
                         #
                         # msg = b''.join([
                         #     message_length,
@@ -349,7 +348,7 @@ class TorrentClient():
                     if self.torrent.file_length() - total_file_length < request_length:
                         request_length = self.torrent.file_length() - total_file_length
                     else:
-                        # if piece_length can be evenly divided by REQUEST_LENGTH
+                        # if piece_length can be evenly divided by self.torrent.REQUEST_LENGTH
                         if piece_length % request_length == 0:
                             begin_offset += request_length
                         else:
@@ -357,38 +356,51 @@ class TorrentClient():
                                 request_length = piece_length - begin_offset
                                 self.logger.info('this is last block of piece {}, requested length is {}'.format(index, piece_length - begin_offset))
                             else:
-                                begin_offset += REQUEST_LENGTH
+                                begin_offset += self.torrent.REQUEST_LENGTH
             else:
                 self.logger.info('Peer doesnt have this piece {}'.format(index))
 
         # self.logger.info('{} has {} picese, requested {} blocks, total length {}'.format(peer.address, total_file_length))
         # time.sleep(10)
         """
-        # while (len(peer.pieces) > 0):
-        block = peer.job_queue.pop()
-        self.logger.info('a block: {}'.format(block))
+        if not peer.choked:
+            while len(peer.queue) > 0:
+                block = peer.queue.pop()
+                if self.pieces.block_needed(block):
+                    peer.writer.write(self._request_message(block))
+                    await peer.writer.drain()
+                    self.pieces.add_requested(block)
+                    # self.logger.info('requested {} from {}'.format(block, peer.address))
+                    break
 
-    def _handle_piece_msg(self, message_payload, peer):
+    async def _handle_piece_msg(self, message_payload, peer):
         """ save blocks sent from peer """
 
         index = struct.unpack('!i', message_payload[:4])[0]
         begin_offset = struct.unpack('!i', message_payload[4:8])[0]
-        block = message_payload[8:]
+        payload = message_payload[8:]
+        block = {
+            'index': index,
+            'begin_offset': begin_offset,
+            'request_length': len(payload)
+        }
+
+        # self.logger.info('block from {}, {}'.format(peer.address, block))
+        received_piece_index = self.pieces.add_received(block)
 
         # self.logger.debug('saving block for piece {}'.format(index))
-        try:
-            downloaded_piece_index = self.pieces.save(index, begin_offset, block)
-        except Exception as e:
-            self.logger.error('save to buffer: {}'.format(e))
-        # self.logger.info('saved the block the buffer')
+        # downloaded_piece_index = self.pieces.save(index, begin_offset, block)
 
-        if downloaded_piece_index is not None:
-            self.pieces_downloaded.append(index)
-            self.logger.info('We have piece {} from {}'.format(downloaded_piece_index, peer.address))
-            self.logger.info('downloaded: {}, total: {}'.format(len(self.pieces_downloaded), self.torrent.number_of_pieces))
+        if received_piece_index is not None:
+            self.pieces_downloaded.append(received_piece_index)
+            # self.logger.info('We have piece {} from {}'.format(received_piece_index, peer.address))
+            # self.logger.info('downloaded: {}, total: {}'.format(len(self.pieces_downloaded), self.torrent.number_of_pieces))
+            self.logger.info('percentage {:.2f}%'.format((len(self.pieces_downloaded) * 100) / self.torrent.number_of_pieces))
             if len(self.pieces_downloaded) == self.torrent.number_of_pieces:
                 self.logger.info('done downloading all the pieces!')
+                return
 
+        await self._request_piece(peer)
 
     def _close_connection(self, peer):
         self.active_peers.remove(peer)

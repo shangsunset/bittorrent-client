@@ -15,21 +15,16 @@ UNCHOKE = bytes([0, 0, 0, 1]) + bytes([1])
 INTERESTED = bytes([0, 0, 0, 1]) + bytes([2])
 NOT_INTERESTED = bytes([0, 0, 0, 1]) + bytes([3])
 
-REQUEST_LENGTH = 2**14
 
 class Peer():
 
     def __init__(self, host, port, torrent):
         self._reader = None
         self._writer = None
-        self._address = {'host': host, 'port': port}
-        self.job_queue = PieceQueue(torrent)
+        self.choked = True
+        self.address = {'host': host, 'port': port}
+        self.queue = PieceQueue(torrent)
         self.timer = datetime.datetime.now()
-
-
-    @property
-    def address(self):
-        return self._address
 
     @property
     def reader(self):
@@ -172,7 +167,7 @@ class PeerProtocol(asyncio.Protocol):
                 message_id = b'\x06'
                 message_length = bytes([0, 0, 0, 13])
                 piece_length = self.torrent.info['piece length']
-                request_length = REQUEST_LENGTH
+                request_length = self.torrent.REQUEST_LENGTH
 
                 # requesting a piece for a peer.
                 begin_offset = 0
@@ -193,14 +188,14 @@ class PeerProtocol(asyncio.Protocol):
                         # self.logger.info('requesting block, index - {}, offset - {}'.format(index, begin_offset))
                         self.blocks_requested[index].append(begin_offset)
 
-                    # if piece_length can be evenly divided by REQUEST_LENGTH
+                    # if piece_length can be evenly divided by self.torrent.REQUEST_LENGTH
                     if piece_length % request_length == 0:
-                        begin_offset += REQUEST_LENGTH
+                        begin_offset += self.torrent.REQUEST_LENGTH
                     else:
                         if piece_length - begin_offset < request_length:
                             request_length = piece_length - begin_offset
                         else:
-                            begin_offset += REQUEST_LENGTH
+                            begin_offset += self.torrent.REQUEST_LENGTH
 
             else:
                 self.logger.info('Peer doesnt have this piece {}'.format(index))

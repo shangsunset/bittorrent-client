@@ -5,7 +5,6 @@ from string import digits, ascii_letters
 from hashlib import sha1
 from bcoding import bdecode, bencode
 
-REQUEST_LENGTH = 2**14
 
 class Torrent():
 
@@ -19,6 +18,7 @@ class Torrent():
         self.left = self.file_length()
         self.piece_length = self.info['piece length']
         self.number_of_pieces = self.number_of_pieces()
+        self.REQUEST_LENGTH = 2**14
 
     def read_torrent_file(self, torrent_file):
         with open(torrent_file, 'rb') as f:
@@ -46,13 +46,13 @@ class Torrent():
         return length
 
     def num_of_blocks(self):
-        return math.ceil(self.piece_length / REQUEST_LENGTH)
+        return math.ceil(self.piece_length / self.REQUEST_LENGTH)
 
     def block_length(self, begin_offset):
-        if self.piece_length - begin_offset < REQUEST_LENGTH:
+        if self.piece_length - begin_offset < self.REQUEST_LENGTH:
             return self.piece_length - begin_offset
         else:
-            return REQUEST_LENGTH
+            return self.REQUEST_LENGTH
 
     def __str__(self):
         return 'info_hash: {}, peer_id: {}, left: {}'.format(
