@@ -18,8 +18,9 @@ logger.addHandler(fh)
 logger.addHandler(ch)
 
 def main():
-    filename = '../street-fighter.torrent'
-    client = TorrentClient(filename, loop)
+    filename = '../beats.torrent'
+    dest = '~/Desktop'
+    client = TorrentClient(filename, dest, loop)
 
     asyncio.ensure_future(client.connect_to_peers())
     asyncio.ensure_future(client.keep_alive())

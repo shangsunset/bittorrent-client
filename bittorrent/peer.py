@@ -23,7 +23,7 @@ class Peer():
         self._writer = None
         self.choked = True
         self.address = {'host': host, 'port': port}
-        self.queue = PieceQueue(torrent)
+        self.queue = PieceQueue(torrent) # store blocks to be requested
         self.timer = datetime.datetime.now()
 
     @property

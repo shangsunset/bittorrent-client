@@ -13,11 +13,17 @@ class Torrent():
         self.metainfo = self.read_torrent_file(torrent_file)
         self.tracker_url = self.metainfo['announce']
         self.info = self.metainfo['info']
+        self.logger.info(self.info['files'])
         self.info_hash = sha1(bencode(self.info)).digest()
         self.peer_id = self.generate_peer_id()
         self.left = self.file_length()
         self.piece_length = self.info['piece length']
         self.number_of_pieces = self.number_of_pieces()
+        pieces_hash = self.info['pieces']
+        self.piece_hash_list = []
+        while len(pieces_hash) > 0:
+            self.piece_hash_list.append(pieces_hash[0:20])
+            pieces_hash = pieces_hash[20:]
         self.REQUEST_LENGTH = 2**14
 
     def read_torrent_file(self, torrent_file):
@@ -44,6 +50,22 @@ class Torrent():
                 length += file_dict['length']
 
         return length
+
+    def get_files_info(self):
+        multi_files = self.info['files']
+        files = []
+        for f in multi_files:
+            files.append({
+                'name': f['path'][0],
+                'length': f['length'],
+                'length_written': 0,
+                'done': False
+            })
+
+        files_info = {}
+        files_info['dirname'] = self.info['name']
+        files_info['files'] = files
+        return files_info
 
     def num_of_blocks(self):
         return math.ceil(self.piece_length / self.REQUEST_LENGTH)

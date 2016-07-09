@@ -1,14 +1,15 @@
 import struct
 import sys
+import os
 import asyncio
 import time
+from hashlib import sha1
 import socket
 import logging
 import datetime
 
 import requests
 from bcoding import bdecode
-from bitstring import BitArray
 
 from torrent import Torrent
 from peer import Peer, PeerProtocol
@@ -23,9 +24,11 @@ NOT_INTERESTED = bytes([0, 0, 0, 1]) + bytes([3])
 
 class TorrentClient():
 
-    def __init__(self, torrent_file, loop):
+    def __init__(self, torrent_file, download_destination, loop):
         self.logger = logging.getLogger('main.torrent_client')
         self.torrent = Torrent(torrent_file)
+        self.files_info = self.torrent.get_files_info()
+        self.download_destination = download_destination
         # save downloaded pieces
         self.pieces = Pieces(self.torrent)
         # keep track blocks that are requested
@@ -305,64 +308,7 @@ class TorrentClient():
         return msg
 
     async def _request_piece(self, peer):
-        """
-        if the peer has this piece, request it block by block.
-        last block of piece needs to calculated if piece cant
-        be evenly divided
 
-        total_file_length = 0
-        for index, piece in enumerate(peer.pieces):
-            if piece:
-
-                # requesting a piece from a peer.
-                begin_offset = 0
-                while begin_offset < piece_length and \
-                        total_file_length < self.torrent.file_length():
-
-                    if begin_offset not in self.blocks_requested[index]:
-                        # message_id = b'\x06'
-                        # message_length = bytes([0, 0, 0, 13])
-                        # piece_length = self.torrent.info['piece length']
-                        # request_length = self.torrent.REQUEST_LENGTH
-                        #
-                        # msg = b''.join([
-                        #     message_length,
-                        #     message_id,
-                        #     struct.pack('!i', index),
-                        #     struct.pack('!i', begin_offset),
-                        #     struct.pack('!i', request_length)
-                        #     ])
-
-                        total_file_length += request_length
-                        # self.logger.info('index: {}, begin offset: {}, request length: {}, total length requested {}'.format(index, begin_offset, request_length, total_file_length))
-
-                        try:
-                            peer.writer.write(self._request_message(index, begin_offset, request_length))
-                            await peer.writer.drain()
-                        except (IOError, TimeoutError, Exception) as e:
-                            self.logger.error('send request: {}'.format(e))
-                            break
-                        self.blocks_requested[index].append(begin_offset)
-
-                    # check if its last extra block
-                    if self.torrent.file_length() - total_file_length < request_length:
-                        request_length = self.torrent.file_length() - total_file_length
-                    else:
-                        # if piece_length can be evenly divided by self.torrent.REQUEST_LENGTH
-                        if piece_length % request_length == 0:
-                            begin_offset += request_length
-                        else:
-                            if piece_length - begin_offset < request_length:
-                                request_length = piece_length - begin_offset
-                                self.logger.info('this is last block of piece {}, requested length is {}'.format(index, piece_length - begin_offset))
-                            else:
-                                begin_offset += self.torrent.REQUEST_LENGTH
-            else:
-                self.logger.info('Peer doesnt have this piece {}'.format(index))
-
-        # self.logger.info('{} has {} picese, requested {} blocks, total length {}'.format(peer.address, total_file_length))
-        # time.sleep(10)
-        """
         if not peer.choked:
             while len(peer.queue) > 0:
                 block = peer.queue.pop()
@@ -386,21 +332,75 @@ class TorrentClient():
         }
 
         # self.logger.info('block from {}, {}'.format(peer.address, block))
+        # self.logger.info(self.torrent.piece_hash_list[index])
+        # self.logger.info(sha1(payload).digest())
+        # if self.torrent.piece_hash_list[index] == sha1(payload).digest():
         received_piece_index = self.pieces.add_received(block)
+        self.write_data(payload, peer)
 
-        # self.logger.debug('saving block for piece {}'.format(index))
-        # downloaded_piece_index = self.pieces.save(index, begin_offset, block)
-
-        if received_piece_index is not None:
-            self.pieces_downloaded.append(received_piece_index)
-            # self.logger.info('We have piece {} from {}'.format(received_piece_index, peer.address))
-            # self.logger.info('downloaded: {}, total: {}'.format(len(self.pieces_downloaded), self.torrent.number_of_pieces))
-            self.logger.info('percentage {:.2f}%'.format((len(self.pieces_downloaded) * 100) / self.torrent.number_of_pieces))
-            if len(self.pieces_downloaded) == self.torrent.number_of_pieces:
-                self.logger.info('done downloading all the pieces!')
-                return
+        # if received_piece_index is not None:
+        #     self.pieces_downloaded.append(received_piece_index)
+        #     # self.logger.info('We have piece {} from {}'.format(received_piece_index, peer.address))
+        #     self.logger.info('downloaded: {}, total: {}'.format(len(self.pieces_downloaded), self.torrent.number_of_pieces))
+        #     self.logger.info('percentage {:.2f}%'.format((len(self.pieces_downloaded) * 100) / self.torrent.number_of_pieces))
+        #     if len(self.pieces_downloaded) == self.torrent.number_of_pieces:
+        #         self.logger.info('done downloading all the pieces!')
+        #         return
 
         await self._request_piece(peer)
+
+    def write_data(self, payload, peer):
+
+        if 'length' in self.torrent.info:
+            name = self.torrent.info['name']
+            # self.logger.debug('single file')
+        else:
+            # self.logger.debug('multi files')
+            self.write_multi_files(self.files_info, payload, peer)
+
+    def write_single_file(self, name):
+        pass
+
+    def write_multi_files(self, files_info, payload, peer):
+        dirname = files_info['dirname']
+        files = files_info['files']
+        dest_path = os.path.join(
+                os.path.expanduser(self.download_destination), dirname)
+        if not os.path.exists(dest_path):
+            os.makedirs(dest_path)
+        for index, f in enumerate(files):
+            if not f['done']:
+                if f['length'] < len(payload):
+                    with open(os.path.join(dest_path, f['name']), 'ab') as new_file:
+                        little_chunk = payload[:f['length']]
+                        new_file.write(str(little_chunk, 'utf-8')
+                        f['length_written'] = len(little_chunk)
+                    with open(os.path.join(dest_path, files[index+1]['name']), 'ab') as next_file:
+                        remaining_chunk = payload[f['length']:]
+                        next_file.write(remaining_chunk)
+                        files[index+1]['length_written'] = len(remaining_chunk)
+
+                elif f['length'] - f['length_written'] < len(payload):
+                    with open(os.path.join(dest_path, f['name']), 'ab') as new_file:
+                        last_chunk = payload[:f['length'] - f['length_written']]
+                        new_file.write(last_chunk)
+                        f['length_written'] += len(last_chunk)
+                    with open(os.path.join(dest_path, files[index+1]['name']), 'ab') as next_file:
+                        remaining_chunk = payload[f['length'] - f['length_written']:]
+                        next_file.write(remaining_chunk)
+                        files[index+1]['length_written'] = len(remaining_chunk)
+                else:
+                    with open(os.path.join(dest_path, f['name']), 'ab') as new_file:
+                        new_file.write(payload)
+                        f['length_written'] += len(payload)
+                        # self.logger.info('file: {}, length: {}'.format(f['name'], f['length']))
+
+                self.logger.info('file: {}, file length: {}, length written {}, from {}'.format(f['name'], f['length'], f['length_written'], peer.address['host']))
+                if f['length'] == f['length_written']:
+                    f['done'] = True
+                    self.logger.info('finished writing to a file!!!')
+                break
+
 
     def _close_connection(self, peer):
         self.active_peers.remove(peer)

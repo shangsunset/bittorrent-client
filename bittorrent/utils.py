@@ -8,14 +8,17 @@ class Pieces():
     def __init__(self, torrent):
         self.logger = logging.getLogger('main.pieces')
         self.torrent = torrent
-        # self.logger.info(self.torrent.info)
         self.received = {index: [] for index in range(torrent.number_of_pieces)}
         self.requested = {index: [] for index in range(torrent.number_of_pieces)}
         self.total_num_requested = 0
 
     def add_received(self, block):
         self.received[block['index']].append(block['begin_offset'])
-        if self.torrent.piece_length - self.received[block['index']][-1] <= self.torrent.REQUEST_LENGTH:
+        # if the diff between piece length and last begin offset is less
+        # than the REQUEST LENGTH, it means all blocks for this piece
+        # have been aquired. return the piece index if so.
+        block_per_piece = self.torrent.piece_length / self.torrent.REQUEST_LENGTH
+        if len(self.requested[block['index']]) == block_per_piece:
             return block['index']
         return None
 
@@ -26,6 +29,8 @@ class Pieces():
             self.total_num_requested += 1
 
     def block_needed(self, block):
+        # in case there are some pieces never received.
+        # copy received list to requested, so can request missing pieces
         if self.total_num_requested == self.torrent.number_of_pieces:
             self.requested = self.received.copy()
         return block['begin_offset'] not in self.requested[block['index']]
