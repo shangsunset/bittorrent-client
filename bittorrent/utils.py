@@ -10,22 +10,28 @@ class Pieces():
         self.torrent = torrent
         self.received = {index: [] for index in range(torrent.number_of_pieces)}
         self.requested = {index: [] for index in range(torrent.number_of_pieces)}
+        self.temp_piece_holder = {index: bytes() for index in range(torrent.number_of_pieces)}
         self.total_num_requested = 0
 
     def add_received(self, block):
         self.received[block['index']].append(block['begin_offset'])
-        # if the diff between piece length and last begin offset is less
-        # than the REQUEST LENGTH, it means all blocks for this piece
-        # have been aquired. return the piece index if so.
-        block_per_piece = self.torrent.piece_length / self.torrent.REQUEST_LENGTH
-        if len(self.requested[block['index']]) == block_per_piece:
-            return block['index']
-        return None
+        # self.logger.info(len(self.received[block['index']]))
+        self.temp_piece_holder[block['index']] += block['payload']
+        if len(self.received[block['index']]) == int(self.torrent.block_per_piece):
+            # self.logger.info('we have piece {}'.format(block['index']))
+            whole_piece = self.temp_piece_holder[block['index']]
+            # self.logger.info(len(whole_piece))
+            # self.logger.info(self.torrent.piece_length)
+            self.temp_piece_holder[block['index']] = b''
+            return (block['index'], whole_piece)
+        return (None, None)
+
+    def remove_received(self, index):
+        self.received[index] = []
 
     def add_requested(self, block):
         self.requested[block['index']].append(block['begin_offset'])
-        block_per_piece = self.torrent.piece_length / self.torrent.REQUEST_LENGTH
-        if len(self.requested[block['index']]) == block_per_piece:
+        if len(self.requested[block['index']]) == self.torrent.block_per_piece:
             self.total_num_requested += 1
 
     def block_needed(self, block):

@@ -18,13 +18,14 @@ class Torrent():
         self.peer_id = self.generate_peer_id()
         self.left = self.file_length()
         self.piece_length = self.info['piece length']
+        self.REQUEST_LENGTH = 2**14
         self.number_of_pieces = self.number_of_pieces()
+        self.block_per_piece = self.piece_length / self.REQUEST_LENGTH
         pieces_hash = self.info['pieces']
         self.piece_hash_list = []
         while len(pieces_hash) > 0:
             self.piece_hash_list.append(pieces_hash[0:20])
             pieces_hash = pieces_hash[20:]
-        self.REQUEST_LENGTH = 2**14
 
     def read_torrent_file(self, torrent_file):
         with open(torrent_file, 'rb') as f:
