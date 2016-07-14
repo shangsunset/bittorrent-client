@@ -11,13 +11,13 @@ class Pieces():
         self.received = {index: [] for index in range(torrent.number_of_pieces)}
         self.requested = {index: [] for index in range(torrent.number_of_pieces)}
         self.temp_piece_holder = {index: bytes() for index in range(torrent.number_of_pieces)}
-        self.total_num_requested = 0
+        self.total_pieces_requested = 0
 
     def add_received(self, block):
         self.received[block['index']].append(block['begin_offset'])
         # self.logger.info(len(self.received[block['index']]))
         self.temp_piece_holder[block['index']] += block['payload']
-        if len(self.received[block['index']]) == int(self.torrent.block_per_piece):
+        if len(self.received[block['index']]) == self.torrent.block_per_piece:
             # self.logger.info('we have piece {}'.format(block['index']))
             whole_piece = self.temp_piece_holder[block['index']]
             # self.logger.info(len(whole_piece))
@@ -26,19 +26,23 @@ class Pieces():
             return (block['index'], whole_piece)
         return (None, None)
 
-    def remove_received(self, index):
+    def discard_piece(self, index):
         self.received[index] = []
+        self.requested[index] = []
 
     def add_requested(self, block):
         self.requested[block['index']].append(block['begin_offset'])
         if len(self.requested[block['index']]) == self.torrent.block_per_piece:
-            self.total_num_requested += 1
+            self.total_pieces_requested += 1
 
-    def block_needed(self, block):
+    def needed(self, block):
         # in case there are some pieces never received.
         # copy received list to requested, so can request missing pieces
-        if self.total_num_requested == self.torrent.number_of_pieces:
+        if self.total_pieces_requested == self.torrent.number_of_pieces:
             self.requested = self.received.copy()
+
+        # self.logger.debug(self.requested[block['index']])
+        # self.logger.info('index {}: {}'.format(index, len(self.requested[index])))
         return block['begin_offset'] not in self.requested[block['index']]
 
     def __len__(self):
