@@ -8,30 +8,35 @@ class Pieces():
     def __init__(self, torrent):
         self.logger = logging.getLogger('main.pieces')
         self.torrent = torrent
-        self.received = {index: [] for index in range(torrent.number_of_pieces)}
-        self.requested = {index: [] for index in range(torrent.number_of_pieces)}
-        self.temp_piece_holder = {index: bytes() for index in range(torrent.number_of_pieces)}
+        self.received = {index: set() for index in range(torrent.number_of_pieces)}
+        self.requested = {index: set() for index in range(torrent.number_of_pieces)}
+        self.temp_piece_holder = {index: bytearray(self.torrent.piece_length) for index in range(torrent.number_of_pieces)}
         self.total_pieces_requested = 0
 
     def add_received(self, block):
-        self.received[block['index']].append(block['begin_offset'])
-        # self.logger.info(len(self.received[block['index']]))
-        self.temp_piece_holder[block['index']] += block['payload']
-        if len(self.received[block['index']]) == self.torrent.block_per_piece:
-            # self.logger.info('we have piece {}'.format(block['index']))
-            whole_piece = self.temp_piece_holder[block['index']]
+        begin = block['begin_offset']
+        index = block['index']
+        self.received[index].add(begin)
+        self.temp_piece_holder[index][begin:len(block['payload'])+begin] = block['payload']
+
+        # self.logger.info(self.temp_piece_holder[index])
+        self.logger.info('index {} begin {}'.format(index, begin))
+        # time.sleep(1)
+        if len(self.received[index]) == self.torrent.block_per_piece:
+            # self.logger.info('we have piece {}'.format(index))
+            whole_piece = self.temp_piece_holder[index]
             # self.logger.info(len(whole_piece))
             # self.logger.info(self.torrent.piece_length)
-            self.temp_piece_holder[block['index']] = b''
-            return (block['index'], whole_piece)
+            self.temp_piece_holder[index] = bytearray()
+            return (index, whole_piece)
         return (None, None)
 
     def discard_piece(self, index):
-        self.received[index] = []
-        self.requested[index] = []
+        self.received[index] = set()
+        self.requested[index] = set()
 
     def add_requested(self, block):
-        self.requested[block['index']].append(block['begin_offset'])
+        self.requested[block['index']].add(block['begin_offset'])
         if len(self.requested[block['index']]) == self.torrent.block_per_piece:
             self.total_pieces_requested += 1
 

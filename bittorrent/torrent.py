@@ -26,6 +26,7 @@ class Torrent():
         while len(pieces_hash) > 0:
             self.piece_hash_list.append(pieces_hash[0:20])
             pieces_hash = pieces_hash[20:]
+        self.logger.info(self.piece_hash_list)
 
     def read_torrent_file(self, torrent_file):
         with open(torrent_file, 'rb') as f:
