@@ -130,8 +130,7 @@ class TorrentClient():
                     except Exception as e:
                         self.logger.error('keep live: {}'.format(e))
                 else:
-                    self.logger.debug('transport is closing or closed for {}'.format(peer.address))
-                    self.logger.info('peer removed')
+                    self.logger.debug('connection closed by {}'.format(peer.address))
                     self._close_connection(peer)
 
     async def _connect_to_peer(self, peer):
@@ -197,6 +196,7 @@ class TorrentClient():
                     return
                 first_4_bytes += chunk
 
+            # self.logger.info('first 4 bytes: {}'.format(first_4_bytes))
             message_length = struct.unpack('!i', first_4_bytes)[0]
 
             if message_length == 0:
@@ -213,6 +213,7 @@ class TorrentClient():
                     if not message_body_chunk:
                         return
                     message_body += message_body_chunk
+                # self.logger.info('message body: {}'.format(message_body))
 
                 message_id = message_body[0]
                 payload = message_body[1:]
@@ -240,6 +241,7 @@ class TorrentClient():
             # we need to update our record
             self.logger.debug('Peer {} sent HAVE message'.format(peer.address))
             index = struct.unpack('!i', payload)[0]
+            self.logger.info('{} has piece {}'.format(peer.address['host'], index))
             no_pieces = len(peer.queue) == 0
             peer.queue.add(index)
             if no_pieces:
@@ -254,10 +256,10 @@ class TorrentClient():
             b = bytearray(payload)
             bitstring = ''.join([bin(x)[2:] for x in b])
             pieces_indexes = [i for i, x in enumerate(bitstring) if x == '1']
-            self.logger.debug('{} has {} pieces'.format(peer.address['host'], pieces_indexes))
             for index in pieces_indexes:
                 peer.queue.add(index)
 
+            self.logger.info('{} has {}'.format(peer.address['host'], pieces_indexes))
             if no_pieces:
                 await self._request_piece(peer)
 
@@ -327,7 +329,7 @@ class TorrentClient():
             'payload': payload
         }
 
-        self.logger.info('block from {}, {}, {}'.format(peer.address, block['index'], block['begin_offset']))
+        self.logger.info('got a block from {}, {}, {}'.format(peer.address, block['index'], block['begin_offset']))
         # self.logger.info(self.torrent.piece_hash_list[index])
         # self.logger.info(sha1(payload).digest())
         # if self.torrent.piece_hash_list[index] == sha1(payload).digest():

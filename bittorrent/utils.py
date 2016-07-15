@@ -23,7 +23,6 @@ class Pieces():
         self.logger.info('index {} begin {}'.format(index, begin))
         # time.sleep(1)
         if len(self.received[index]) == self.torrent.block_per_piece:
-            # self.logger.info('we have piece {}'.format(index))
             whole_piece = self.temp_piece_holder[index]
             # self.logger.info(len(whole_piece))
             # self.logger.info(self.torrent.piece_length)
