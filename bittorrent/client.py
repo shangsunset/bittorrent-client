@@ -11,6 +11,7 @@ import datetime
 import requests
 from bcoding import bdecode
 
+from tracker import Tracker
 from torrent import Torrent
 from peer import Peer, PeerProtocol
 from utils import Pieces
@@ -33,64 +34,12 @@ class TorrentClient():
         self.dest_path = self.create_dir(self.files_info)
         self.pieces = Pieces(self.torrent) # save downloaded pieces
         self.pieces_downloaded = [] # keep track blocks that are requested
-        self.peers = self._discover_peers()
+        tracker = Tracker(self.torrent)
+        peers_list = tracker.connect()
+        self.peers = [Peer(p['hostname'], p['port'], self.torrent)
+                for p in peers_list]
+        # self.peers = self._discover_peers()
         self.active_peers = []
-
-    def _discover_peers(self):
-        """
-        get peers connected to the torrent.
-        peers from the tracker response is bencoded raw binary data,
-        this method parses the raw binary data and returns a list of peers
-        """
-        tracker_response = self._connect_to_tracker()
-        if 'failure reason' not in tracker_response:
-            peers = self._decode_peers(tracker_response['peers'])
-            return peers
-        else:
-            time.sleep(tracker_response['interval'])
-
-    def _decode_peers(self, bin_peers):
-        """
-        The first 4 bytes contain the 32-bit ipv4 address.
-        The remaining two bytes contain the port number.
-        Both address and port use network-byte order.
-        """
-        offset = 0
-        peers = []
-        # Length of bin_peers should be multiple of 6
-        while offset != len(bin_peers):
-            bin_ip = struct.unpack_from('!i', bin_peers, offset)[0]
-            host = socket.inet_ntoa(struct.pack('!i', bin_ip))
-            offset += 4
-            port = struct.unpack_from('!H', bin_peers, offset)[0]
-            offset += 2
-            peer = Peer(host, port, self.torrent)
-            # peer = {'host': host, 'port': port}
-            peers.append(peer)
-
-        return peers
-
-    def _connect_to_tracker(self):
-        """
-        https://wiki.theory.org/BitTorrentSpecification#Tracker_Request_Parameters
-        make a request to tracker which is an HTTP(S) service
-        that holds information about the torrent and peers.
-        """
-
-        keys = {
-            'info_hash': self.torrent.info_hash,
-            'peer_id': self.torrent.peer_id,
-            'left': self.torrent.left,
-            'downloaded': 0,
-            'uploaded': 0,
-            'port': 6881,
-            'compact': 1,
-            'event': 'started'
-        }
-
-        r = requests.get(self.torrent.tracker_url, params=keys)
-        response = bdecode(r.content)
-        return response
 
     def _hand_shake(self):
         """ https://wiki.theory.org/BitTorrentSpecification#Handshake """

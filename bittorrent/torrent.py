@@ -11,7 +11,7 @@ class Torrent():
     def __init__(self, torrent_file):
         self.logger = logging.getLogger('main.torrent')
         self.metainfo = self.read_torrent_file(torrent_file)
-        self.tracker_url = self.metainfo['announce']
+        self.announce_url = self.metainfo['announce']
         self.info = self.metainfo['info']
         self.logger.info(self.info['files'])
         self.info_hash = sha1(bencode(self.info)).digest()
@@ -26,7 +26,7 @@ class Torrent():
         while len(pieces_hash) > 0:
             self.piece_hash_list.append(pieces_hash[0:20])
             pieces_hash = pieces_hash[20:]
-        self.logger.info(self.piece_hash_list)
+        # self.logger.info(self.piece_hash_list)
 
     def read_torrent_file(self, torrent_file):
         with open(torrent_file, 'rb') as f:

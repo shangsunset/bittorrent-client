@@ -18,7 +18,7 @@ logger.addHandler(fh)
 logger.addHandler(ch)
 
 def main():
-    filename = '../beats.torrent'
+    filename = '../book.torrent'
     dest = '~/Desktop'
     client = TorrentClient(filename, dest, loop)
 
