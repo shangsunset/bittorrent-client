@@ -36,13 +36,18 @@ class Tracker():
     def _connect_via_udp(self):
         connect_response = self._connect_request()
         action, transition_id, connection_id = struct.unpack('!LLQ', connect_response)
+        self.logger.info(transition_id)
         self.connection_id = connection_id
+        self.transition_id = transition_id
         if action == CONNECT:
             announce_response = self._announce_request(transition_id)
-            r = struct.unpack('!5I', announce_response)
-            self.logger.info(announce_response)
-            self.logger.info(r)
-            # self.logger.info(self._decode_peers(announce_response[20:]))
+            self.logger.info(len(announce_response))
+            action, transition_id, interval = struct.unpack('!3I', announce_response[:12])
+            if transition_id == self.transition_id:
+                bin_peers = announce_response[20:]
+                return self._decode_peers(bin_peers)
+        else:
+            self.logger.error('Error sending request to tracker via udp')
 
     def _announce_request(self, transition_id):
         message = b''.join([
@@ -57,7 +62,7 @@ class Tracker():
             struct.pack('!I', 2),
             struct.pack('!I', 0),
             struct.pack('!i', -1),
-            struct.pack('!I', randint(0, 1**32 -1)),
+            struct.pack('!I', randint(0, 2**32 -1)),
             struct.pack('!H', 6881)
         ])
         return self._send_message(message)
@@ -65,7 +70,7 @@ class Tracker():
 
     def _connect_request(self):
         action = CONNECT
-        transition_id = randint(0, 1**32 -1)
+        transition_id = randint(0, 2**32 -1)
         message = struct.pack('!QLL', self.connection_id, action, transition_id)
         # self.logger.info(transition_id)
         return self._send_message(message)
