@@ -4,13 +4,14 @@ import os
 import struct
 import time
 from random import randint
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlencode
 
 from bcoding import bdecode
 import requests
 
 CONNECT = 0
-CONNECTION_ID = 0x41727101980
+ANNOUNCE = 1
+DEFAULT_CONNECTION_ID = 0x41727101980
 
 class Tracker():
 
@@ -24,31 +25,53 @@ class Tracker():
         self.port = u.port
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.timeout = 2
-        self.connection_id = DEFAULT_CONNTION_ID
+        self.connection_id = DEFAULT_CONNECTION_ID
 
     def connect(self):
         if self.scheme == 'udp':
-            return _self.connect_via_udp()
+            return self._connect_via_udp()
         elif self.scheme == 'http':
             return self._connect_via_http()
 
     def _connect_via_udp(self):
-        response = _connect_request()
-        action, transition_id, connection_id = struct.unpack('!LLQ', response)
+        connect_response = self._connect_request()
+        action, transition_id, connection_id = struct.unpack('!LLQ', connect_response)
         self.connection_id = connection_id
-        response = _annouce_request(transition_id)
+        if action == CONNECT:
+            announce_response = self._announce_request(transition_id)
+            r = struct.unpack('!5I', announce_response)
+            self.logger.info(announce_response)
+            self.logger.info(r)
+            # self.logger.info(self._decode_peers(announce_response[20:]))
 
     def _announce_request(self, transition_id):
-        pass
+        message = b''.join([
+            struct.pack('!Q', self.connection_id),
+            struct.pack('!I',  ANNOUNCE),
+            struct.pack('!I', transition_id),
+            struct.pack('!20s', self.torrent.info_hash),
+            struct.pack('!20s', str.encode(self.torrent.peer_id)),
+            struct.pack('!Q', 0),
+            struct.pack('!Q', self.torrent.left),
+            struct.pack('!Q', 0),
+            struct.pack('!I', 2),
+            struct.pack('!I', 0),
+            struct.pack('!i', -1),
+            struct.pack('!I', randint(0, 1**32 -1)),
+            struct.pack('!H', 6881)
+        ])
+        return self._send_message(message)
 
 
     def _connect_request(self):
         action = CONNECT
-        transition_id = randint(0, 1 << 32 -1)
+        transition_id = randint(0, 1**32 -1)
         message = struct.pack('!QLL', self.connection_id, action, transition_id)
         # self.logger.info(transition_id)
-        self.sock.sendto(message, (self.hostname, self.port))
+        return self._send_message(message)
 
+    def _send_message(self, message):
+        self.sock.sendto(message, (self.hostname, self.port))
         self.sock.settimeout(self.timeout)
         try:
             response = self.sock.recv(1024)
@@ -64,7 +87,7 @@ class Tracker():
         that holds information about the torrent and peers.
         """
 
-        keys = {
+        params = {
             'info_hash': self.torrent.info_hash,
             'peer_id': self.torrent.peer_id,
             'left': self.torrent.left,
@@ -75,7 +98,7 @@ class Tracker():
             'event': 'started'
         }
 
-        r = requests.get(self.url, params=keys)
+        r = requests.get(self.url, params=params)
         response = bdecode(r.content)
         if 'failure reason' not in response:
             return self._decode_peers(response['peers'])
