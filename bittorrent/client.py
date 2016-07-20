@@ -38,7 +38,6 @@ class TorrentClient():
         peers_list = tracker.connect()
         self.peers = [Peer(p['hostname'], p['port'], self.torrent)
                 for p in peers_list]
-        # self.peers = self._discover_peers()
         self.active_peers = []
 
     def _hand_shake(self):
@@ -225,22 +224,14 @@ class TorrentClient():
     def _request_message(self, block):
         message_id = b'\x06'
         message_length = bytes([0, 0, 0, 13])
-        piece_length = self.torrent.info['piece length']
-        request_length = self.torrent.REQUEST_LENGTH
-
-        # total_file_length = 0
-        # begin_offset = 0
-        # while begin_offset < piece_length and \
-        #     total_file_length < self.torrent.file_length():
 
         msg = b''.join([
             message_length,
             message_id,
-            struct.pack('!i', block['index']),
-            struct.pack('!i', block['begin_offset']),
-            struct.pack('!i', block['request_length'])
+            struct.pack('!I', block['index']),
+            struct.pack('!I', block['begin_offset']),
+            struct.pack('!I', block['request_length'])
             ])
-        # total_file_length += request_length
 
         return msg
 
@@ -251,18 +242,18 @@ class TorrentClient():
                 index_left = set()
                 for b in peer.queue.queue:
                     index_left.add(b['index'])
-                # self.logger.info('peer queue {}'.format(index_left))
-                block = peer.queue.pop()
-                self.logger.info('pop a block from piece {}'.format(block['index']))
+                self.logger.info('peer queue {}'.format(index_left))
                 self.logger.info('{} blocks left to request from {}'.format(len(peer.queue.queue), peer.address['host']))
+                block = peer.queue.pop()
+                self.logger.info(block)
                 if self.pieces.needed(block):
                     try:
                         peer.writer.write(self._request_message(block))
                         await peer.writer.drain()
                     except Exception as e:
                         self.logger.error(e)
-                    self.pieces.add_requested(block)
                     self.logger.info('requested {} from {}'.format(block, peer.address['host']))
+                    self.pieces.add_requested(block)
                     break
 
     async def _handle_piece_msg(self, message_payload, peer):
@@ -279,15 +270,12 @@ class TorrentClient():
         }
 
         self.logger.info('got a block from {}, {}, {}'.format(peer.address, block['index'], block['begin_offset']))
-        # self.logger.info(self.torrent.piece_hash_list[index])
-        # self.logger.info(sha1(payload).digest())
-        # if self.torrent.piece_hash_list[index] == sha1(payload).digest():
         piece_index, piece = self.pieces.add_received(block)
 
         if piece is not None:
             hashed_piece = sha1(piece).digest()
-            self.logger.info(self.torrent.piece_hash_list[piece_index])
-            self.logger.info(hashed_piece)
+            # self.logger.info(self.torrent.piece_hash_list[piece_index])
+            # self.logger.info(hashed_piece)
             if self.torrent.piece_hash_list[piece_index] == hashed_piece:
                 self.pieces_downloaded.append(piece_index)
 
@@ -296,12 +284,17 @@ class TorrentClient():
                 self.logger.info('downloaded: {}, total: {}'.format(len(self.pieces_downloaded), self.torrent.number_of_pieces))
                 # self.logger.info('percentage {:.2f}%'.format((len(self.pieces_downloaded) * 100) / self.torrent.number_of_pieces))
             else:
-                # self.logger.debug('discarding piece {} ***********************'.format(piece_index))
+                self.logger.debug('discarding piece {} ***********************'.format(piece_index))
                 self.pieces.discard_piece(piece_index)
                 for p in self.active_peers:
                     p.queue.add(piece_index)
 
-        await self._request_piece(peer)
+        if self.pieces.end_game_mode:
+            await asyncio.gather(
+                    *[self._request_piece(peer) for peer in self.active_peers]
+                    )
+        else:
+            await self._request_piece(peer)
 
     def write_data(self, piece, peer):
 

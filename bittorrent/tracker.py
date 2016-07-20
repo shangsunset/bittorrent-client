@@ -32,16 +32,17 @@ class Tracker():
             return self._connect_via_udp()
         elif self.scheme == 'http':
             return self._connect_via_http()
+        else:
+            self.logger.error('client couldnt understand tracker announce url')
 
     def _connect_via_udp(self):
         connect_response = self._connect_request()
         action, transition_id, connection_id = struct.unpack('!LLQ', connect_response)
-        self.logger.info(transition_id)
         self.connection_id = connection_id
         self.transition_id = transition_id
         if action == CONNECT:
             announce_response = self._announce_request(transition_id)
-            self.logger.info(len(announce_response))
+            # self.logger.info(len(announce_response))
             action, transition_id, interval = struct.unpack('!3I', announce_response[:12])
             if transition_id == self.transition_id:
                 bin_peers = announce_response[20:]

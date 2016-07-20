@@ -10,7 +10,8 @@ class Pieces():
         self.torrent = torrent
         self.received = {index: set() for index in range(torrent.number_of_pieces)}
         self.requested = {index: set() for index in range(torrent.number_of_pieces)}
-        self.temp_piece_holder = {index: bytearray(self.torrent.piece_length) for index in range(torrent.number_of_pieces)}
+        self.temp_piece_holder = {index: bytearray(self.torrent.piece_length(index)) for index in range(torrent.number_of_pieces)}
+        self.end_game_mode = False
         self.total_pieces_requested = 0
 
     def add_received(self, block):
@@ -20,12 +21,8 @@ class Pieces():
         self.temp_piece_holder[index][begin:len(block['payload'])+begin] = block['payload']
 
         # self.logger.info(self.temp_piece_holder[index])
-        self.logger.info('index {} begin {}'.format(index, begin))
-        # time.sleep(1)
-        if len(self.received[index]) == self.torrent.block_per_piece:
+        if len(self.received[index]) == self.torrent.blocks_per_piece(index):
             whole_piece = self.temp_piece_holder[index]
-            # self.logger.info(len(whole_piece))
-            # self.logger.info(self.torrent.piece_length)
             self.temp_piece_holder[index] = bytearray()
             return (index, whole_piece)
         return (None, None)
@@ -36,7 +33,7 @@ class Pieces():
 
     def add_requested(self, block):
         self.requested[block['index']].add(block['begin_offset'])
-        if len(self.requested[block['index']]) == self.torrent.block_per_piece:
+        if len(self.requested[block['index']]) == self.torrent.blocks_per_piece(block['index']):
             self.total_pieces_requested += 1
 
     def needed(self, block):
@@ -65,11 +62,11 @@ class PieceQueue():
 
     def add(self, index):
         piece_length = self.torrent.info['piece length']
-        for i in range(self.torrent.num_of_blocks()):
+        for i in range(self.torrent.blocks_per_piece(index)):
             block = {
                 'index': index,
                 'begin_offset': i * self.torrent.REQUEST_LENGTH,
-                'request_length': self.torrent.block_length(i * self.torrent.REQUEST_LENGTH)
+                'request_length': self.torrent.block_length(index, i)
             }
             self.queue.append(block)
 
