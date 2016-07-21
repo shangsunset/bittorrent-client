@@ -1,8 +1,10 @@
 import os
+import logging
 
 class FileManager():
 
     def __init__(self, torrent, destination):
+        self.logger = logging.getLogger('main.file_manager')
         self.torrent_info = torrent.info
         self.destination = destination
 
@@ -43,7 +45,7 @@ class FileManager():
 
     def create_dir_file(self, info_dict):
 
-        self.file_descriptors = []
+        self.files = []
         if info_dict['mode'] == 'multiple':
             file_list = info_dict['files']
             dir_path = os.path.join(
@@ -56,69 +58,58 @@ class FileManager():
                 file_path = os.path.join(dir_path, f['name'])
                 if not os.path.exists(file_path):
                     fd = open(file_path, 'wb')
-                    fd.close()
-                    self.file_descriptors.append(fd)
+                    # fd.close()
+                    self.files.append({
+                        'descriptor': fd,
+                        'length_to_write': f['length'],
+                        'offset': 0
+                    })
+                else:
+                    raise IOError('file already exists.')
         else:
             file_path = os.path.join(
                     os.path.expanduser(self.destination), info_dict['name'])
 
             if not os.path.exists(file_path):
                 fd = open(file_path, 'wb')
-                fd.close()
-                self.file_descriptors.append(fd)
+                # fd.close()
+                self.files.append({
+                    'descriptor': fd,
+                    'length_to_write': f['length'],
+                    'offset': 0
+                })
             else:
                 raise IOError('file already exists.')
 
-    def write(self, piece, peer):
+    def write(self, data, peer):
+        for f in self.files:
+            fd = f['descriptor']
+            length_to_write = f['length_to_write']
+            offset = f['offset']
+            if length_to_write != 0:
 
-        if self.info_dict['mode'] == 'single':
-            self.write_single_file(piece, peer)
-        else:
-            self.write_multi_files(piece, peer)
+                if length_to_write > len(data):
+                    self.logger.debug('writing to {}'.format(fd.name))
+                    self.logger.debug('at pos {}'.format(fd.tell()))
+                    self.logger.debug('offset: {}'.format(offset))
+                    self.logger.debug('length to write {}'.format(length_to_write))
+                    self.logger.debug('wrote length: {}'.format(len(data)))
 
-    def write_single_file(self, name):
-        pass
+                    fd.seek(offset)
+                    fd.write(data)
+                    f['length_to_write'] -= len(data)
+                    f['offset'] += len(data)
+                    return
+                else:
+                    self.logger.debug('at pos {}'.format(fd.tell()))
+                    self.logger.debug('length to write {}'.format(length_to_write))
+                    self.logger.debug('offset: {}'.format(offset))
+                    self.logger.debug('wrote length: {}'.format(len(data[:length_to_write])))
+                    self.logger.debug('finished writing to {}'.format(fd.name))
+                    self.logger.debug('remaining data length: {}'.format(len(data[length_to_write:])))
 
-    def write_multi_files(self, payload, peer):
-        for fd in self.file_descriptors:
-            pass
-
-    # def write_multi_files(self, payload, peer):
-    #     for index, f in enumerate(self.file_list):
-    #         if not f['done']:
-    #             if f['length'] < len(payload):
-    #                 with open(os.path.join(self.dest_path, f['name']), 'wb') as new_file:
-    #                     little_chunk = payload[:f['length']]
-    #                     new_file.seek(f['length_written'])
-    #                     new_file.write(little_chunk)
-    #                     f['length_written'] = len(little_chunk)
-    #                 with open(os.path.join(self.dest_path, files[index+1]['name']), 'ab') as next_file:
-    #                     remaining_chunk = payload[f['length']:]
-    #                     next_file.seek(files[index+1]['length_written'])
-    #                     next_file.write(remaining_chunk)
-    #                     files[index+1]['length_written'] = len(remaining_chunk)
-    #
-    #             elif f['length'] - f['length_written'] < len(payload):
-    #                 with open(os.path.join(self.dest_path, f['name']), 'wb') as new_file:
-    #                     last_chunk = payload[:f['length'] - f['length_written']]
-    #                     new_file.seek(f['length_written'])
-    #                     new_file.write(last_chunk)
-    #                     f['length_written'] += len(last_chunk)
-    #                     self.logger.debug('wrote last chunk to file')
-    #                 with open(os.path.join(self.dest_path, files[index+1]['name']), 'ab') as next_file:
-    #                     remaining_chunk = payload[f['length'] - f['length_written']:]
-    #                     next_file.seek(files[index+1]['length_written'])
-    #                     next_file.write(remaining_chunk)
-    #                     files[index+1]['length_written'] = len(remaining_chunk)
-    #
-    #             else:
-    #                 with open(os.path.join(self.dest_path, f['name']), 'wb') as new_file:
-    #                     new_file.seek(f['length_written'])
-    #                     new_file.write(payload)
-    #                     f['length_written'] += len(payload)
-    #
-    #             self.logger.info('file: {}, file length: {}, length written {}'.format(f['name'], f['length'], f['length_written'], peer.address['host']))
-    #             if f['length'] == f['length_written']:
-    #                 self.logger.info('finished file {}'.format(f['name']))
-    #                 f['done'] = True
-    #             break
+                    fd.seek(offset)
+                    fd.write(data[:length_to_write])
+                    fd.close()
+                    f['length_to_write'] = 0
+                    data = data[length_to_write:]

@@ -247,17 +247,16 @@ class TorrentClient():
                 index_left = set()
                 for b in peer.queue.queue:
                     index_left.add(b['index'])
-                self.logger.info('peer queue {}'.format(index_left))
-                self.logger.info('{} blocks left to request from {}'.format(len(peer.queue.queue), peer.address['host']))
+                # self.logger.info('peer queue {}'.format(index_left))
+                # self.logger.info('{} blocks left to request from {}'.format(len(peer.queue.queue), peer.address['host']))
                 block = peer.queue.pop()
-                self.logger.info(block)
                 if self.pieces.needed(block):
                     try:
                         peer.writer.write(self._request_message(block))
                         await peer.writer.drain()
                     except Exception as e:
                         self.logger.error(e)
-                    self.logger.info('requested {} from {}'.format(block, peer.address['host']))
+                    # self.logger.info('requested {} from {}'.format(block, peer.address['host']))
                     self.pieces.add_requested(block)
                     break
 
@@ -274,7 +273,7 @@ class TorrentClient():
             'payload': payload
         }
 
-        self.logger.info('got a block from {}, {}, {}'.format(peer.address, block['index'], block['begin_offset']))
+        # self.logger.info('got a block from {}, {}, {}'.format(peer.address, block['index'], block['begin_offset']))
         piece_index, piece = self.pieces.add_received(block)
 
         if piece is not None:
@@ -284,9 +283,9 @@ class TorrentClient():
             if self.torrent.piece_hash_list[piece_index] == hashed_piece:
                 self.pieces_downloaded.append(piece_index)
 
-                # self.file_manager.write(piece, peer)
                 self.logger.info('we have piece {}'.format(piece_index))
-                self.logger.info('downloaded: {}, total: {}'.format(len(self.pieces_downloaded), self.torrent.number_of_pieces))
+                # self.logger.info('downloaded: {}, total: {}'.format(len(self.pieces_downloaded), self.torrent.number_of_pieces))
+                self.file_manager.write(piece, peer)
                 if len(self.pieces_downloaded) == self.torrent.number_of_pieces:
                     self.logger.info('finished downloading!!!')
                     return
