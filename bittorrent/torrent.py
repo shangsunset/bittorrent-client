@@ -38,23 +38,6 @@ class Torrent():
 
     def get_number_of_pieces(self):
         return len(self.piece_hash_list)
-        # return math.ceil(self.file_length() / self.piece_length)
-
-    def get_files_info(self):
-        multi_files = self.info['files']
-        files = []
-        for f in multi_files:
-            files.append({
-                'name': f['path'][0],
-                'length': f['length'],
-                'length_written': 0,
-                'done': False
-            })
-
-        files_info = {}
-        files_info['dirname'] = self.info['name']
-        files_info['files'] = files
-        return files_info
 
     def blocks_per_piece(self, piece_index):
         return math.ceil(self.piece_length(piece_index) / self.REQUEST_LENGTH)
@@ -77,7 +60,10 @@ class Torrent():
         last_piece_index = math.floor(total_length / piece_length)
         last_piece_length = total_length % piece_length
 
-        return last_piece_length if piece_index == last_piece_index else piece_length
+        if piece_index == last_piece_index:
+            return last_piece_length
+        else:
+            return piece_length
 
     def block_length(self, piece_index, block_index):
         piece_length = self.piece_length(piece_index)

@@ -14,6 +14,7 @@ from bcoding import bdecode
 from tracker import Tracker
 from torrent import Torrent
 from peer import Peer, PeerProtocol
+from file_manager import FileManager
 from utils import Pieces
 
 KEEPALIVE = bytes([0, 0, 0, 0])
@@ -29,9 +30,8 @@ class TorrentClient():
         self.logger = logging.getLogger('main.torrent_client')
         self.loop = loop
         self.torrent = Torrent(torrent_file)
-        self.download_destination = download_destination
-        self.files_info = self.torrent.get_files_info()
-        self.dest_path = self.create_dir(self.files_info)
+        # self.download_destination = download_destination
+        # self.files_info = self.torrent.get_files_info()
         self.pieces = Pieces(self.torrent) # save downloaded pieces
         self.pieces_downloaded = [] # keep track blocks that are requested
         tracker = Tracker(self.torrent)
@@ -39,6 +39,7 @@ class TorrentClient():
         self.peers = [Peer(p['hostname'], p['port'], self.torrent)
                 for p in peers_list]
         self.active_peers = []
+        self.file_manager = FileManager(self.torrent, download_destination)
 
     def _hand_shake(self):
         """ https://wiki.theory.org/BitTorrentSpecification#Handshake """
@@ -80,6 +81,10 @@ class TorrentClient():
                 else:
                     self.logger.debug('connection closed by {}'.format(peer.address))
                     self._close_connection(peer)
+
+    def _close_connection(self, peer):
+        self.active_peers.remove(peer)
+        peer.writer.close()
 
     async def _connect_to_peer(self, peer):
 
@@ -279,84 +284,16 @@ class TorrentClient():
             if self.torrent.piece_hash_list[piece_index] == hashed_piece:
                 self.pieces_downloaded.append(piece_index)
 
-                # self.write_data(piece, peer)
+                # self.file_manager.write(piece, peer)
                 self.logger.info('we have piece {}'.format(piece_index))
                 self.logger.info('downloaded: {}, total: {}'.format(len(self.pieces_downloaded), self.torrent.number_of_pieces))
+                if len(self.pieces_downloaded) == self.torrent.number_of_pieces:
+                    self.logger.info('finished downloading!!!')
+                    return
                 # self.logger.info('percentage {:.2f}%'.format((len(self.pieces_downloaded) * 100) / self.torrent.number_of_pieces))
             else:
-                self.logger.debug('discarding piece {} ***********************'.format(piece_index))
                 self.pieces.discard_piece(piece_index)
                 for p in self.active_peers:
                     p.queue.add(piece_index)
 
-        if self.pieces.end_game_mode:
-            await asyncio.gather(
-                    *[self._request_piece(peer) for peer in self.active_peers]
-                    )
-        else:
-            await self._request_piece(peer)
-
-    def write_data(self, piece, peer):
-
-        if 'length' in self.torrent.info:
-            name = self.torrent.info['name']
-        else:
-            self.write_multi_files(piece, peer)
-
-    def write_single_file(self, name):
-        pass
-
-    def create_dir(self, files_info):
-        dirname = files_info['dirname']
-        files = files_info['files']
-        dest_path = os.path.join(
-                os.path.expanduser(self.download_destination), dirname)
-        if not os.path.exists(dest_path):
-            os.makedirs(dest_path)
-
-        return dest_path
-
-    def write_multi_files(self, payload, peer):
-        files = self.files_info['files']
-        for index, f in enumerate(files):
-            if not f['done']:
-                if f['length'] < len(payload):
-                    with open(os.path.join(self.dest_path, f['name']), 'wb') as new_file:
-                        little_chunk = payload[:f['length']]
-                        new_file.seek(f['length_written'])
-                        new_file.write(little_chunk)
-                        f['length_written'] = len(little_chunk)
-                    with open(os.path.join(self.dest_path, files[index+1]['name']), 'ab') as next_file:
-                        remaining_chunk = payload[f['length']:]
-                        next_file.seek(files[index+1]['length_written'])
-                        next_file.write(remaining_chunk)
-                        files[index+1]['length_written'] = len(remaining_chunk)
-
-                elif f['length'] - f['length_written'] < len(payload):
-                    with open(os.path.join(self.dest_path, f['name']), 'wb') as new_file:
-                        last_chunk = payload[:f['length'] - f['length_written']]
-                        new_file.seek(f['length_written'])
-                        new_file.write(last_chunk)
-                        f['length_written'] += len(last_chunk)
-                        self.logger.debug('wrote last chunk to file')
-                    with open(os.path.join(self.dest_path, files[index+1]['name']), 'ab') as next_file:
-                        remaining_chunk = payload[f['length'] - f['length_written']:]
-                        next_file.seek(files[index+1]['length_written'])
-                        next_file.write(remaining_chunk)
-                        files[index+1]['length_written'] = len(remaining_chunk)
-
-                else:
-                    with open(os.path.join(self.dest_path, f['name']), 'wb') as new_file:
-                        new_file.seek(f['length_written'])
-                        new_file.write(payload)
-                        f['length_written'] += len(payload)
-
-                self.logger.info('file: {}, file length: {}, length written {}'.format(f['name'], f['length'], f['length_written'], peer.address['host']))
-                if f['length'] == f['length_written']:
-                    self.logger.info('finished file {}'.format(f['name']))
-                    f['done'] = True
-                break
-
-    def _close_connection(self, peer):
-        self.active_peers.remove(peer)
-        peer.writer.close()
+        await self._request_piece(peer)
