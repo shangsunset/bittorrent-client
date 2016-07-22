@@ -7,7 +7,7 @@ import struct
 import logging
 
 from bitstring import BitArray
-from utils import PieceQueue
+from .utils import PieceQueue
 
 KEEPALIVE = bytes([0, 0, 0, 0])
 CHOKE = bytes([0, 0, 0, 1]) + bytes([0])

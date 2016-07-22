@@ -126,8 +126,7 @@ class Tracker():
             offset += 4
             port = struct.unpack_from('!H', bin_peers, offset)[0]
             offset += 2
-            # peer = Peer(hostname, port, self.torrent)
-            # peer = {'hostname': hostname, 'port': port}
-            peers.append({'hostname': hostname, 'port': port})
+            peer = {'hostname': hostname, 'port': port}
+            peers.append(peer)
 
         return peers

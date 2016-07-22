@@ -1,7 +1,7 @@
 import logging
 import asyncio
 
-from client import TorrentClient
+from bittorrent.client import TorrentClient
 
 logger = logging.getLogger('main')
 logger.setLevel(logging.DEBUG)
@@ -18,7 +18,7 @@ logger.addHandler(fh)
 logger.addHandler(ch)
 
 def main():
-    filename = '../beats.torrent'
+    filename = 'beats.torrent'
     dest = '~/Desktop'
     client = TorrentClient(filename, dest, loop)
 

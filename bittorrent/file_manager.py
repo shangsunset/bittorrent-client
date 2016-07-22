@@ -7,7 +7,6 @@ class FileManager():
         self.logger = logging.getLogger('main.file_manager')
         self.torrent = torrent
         self.destination = destination
-
         info_dict = self.get_files_info()
         self.create_dir_file(info_dict)
 
@@ -34,7 +33,6 @@ class FileManager():
                     'name': f['path'][0],
                     'length': f['length'],
                     'length_written': 0,
-                    'done': False
                 })
 
             files_info = {}
@@ -55,8 +53,9 @@ class FileManager():
                 os.makedirs(dir_path)
 
             tmp_file_path = os.path.join(dir_path, 'tmp.tmp')
+            self.tmp_file_path = tmp_file_path
             if not os.path.isfile(tmp_file_path):
-                self.tmp_file = open(tmp_file_path, 'w')
+                self.tmp_file = open(tmp_file_path, 'wb')
                 self.tmp_file.close()
 
             self.tmp_file = open(tmp_file_path, 'r+b')
@@ -74,7 +73,6 @@ class FileManager():
                 self.files.append({
                     'descriptor': fd,
                     'length_to_write': f['length'],
-                    'offset': 0
                 })
         else:
             file_path = os.path.join(
@@ -87,54 +85,46 @@ class FileManager():
                 self.files.append({
                     'descriptor': fd,
                     'length_to_write': f['length'],
-                    'offset': 0
                 })
             else:
                 raise IOError('file already exists.')
 
     def write(self, piece_index, data):
+        """
+        because pieces dont come in in order,
+        we need to put pieces in order in a temporary file first.
+        once we have all the pieces in order in the temporary file,
+        write to actual files in order
+        """
 
         offset = piece_index * len(data)
         self.tmp_file.seek(offset)
         self.tmp_file.write(data)
         self.tmp_file_length += len(data)
+        # self.tmp_file_length = os.path.getsize(self.tmp_file_path)
         total_file_length = self.torrent.file_length()
-        self.logger.debug('writing to tmp file: {}, total length: {}'.format(self.tmp_file_length, total_file_length))
+        self.logger.debug('writing to tmp file: {}, total length: {}'.format(os.path.getsize(self.tmp_file_path), total_file_length))
         if self.tmp_file_length == total_file_length:
-            self.logger.debug(self.tmp_file)
-            content = self.tmp_file.read()
-            self.logger.debug(len(content))
+            # close tmp file for writing
             self.tmp_file.close()
-            self.write_to_file(content)
+            # open for reading
+            with open(self.tmp_file_path, 'r+b') as fd:
+                content = fd.read()
+                self.logger.debug(len(content))
+                self.write_to_file(content)
 
     def write_to_file(self, content):
 
-        self.logger.debug('content length: {}'.format(len(content)))
         self.logger.debug('start writing to actual files')
         for f in self.files:
             fd = f['descriptor']
             length_to_write = f['length_to_write']
-            offset = f['offset']
-
-                # if length_to_write > len(data):
-                #     self.logger.debug('writing to {}'.format(fd.name))
-                #     self.logger.debug('at pos {}'.format(fd.tell()))
-                #     self.logger.debug('offset: {}'.format(offset))
-                #     self.logger.debug('length to write {}'.format(length_to_write))
-                #     self.logger.debug('wrote length: {}'.format(len(data)))
-                #
-                #     fd.seek(offset)
-                #     fd.write(data)
-                #     f['length_to_write'] -= len(data)
-                #     f['offset'] += len(data)
-                #     return
-                # else:
-            fd.seek(offset)
+            fd.seek(0)
             fd.write(content[:length_to_write])
             content = content[length_to_write:]
+
             self.logger.debug('at pos {}'.format(fd.tell()))
             self.logger.debug('length to write {}'.format(length_to_write))
-            # self.logger.debug('offset: {}'.format(offset))
             self.logger.debug('wrote length: {}'.format(len(content[:length_to_write])))
             self.logger.debug('finished writing to {}'.format(fd.name))
             self.logger.debug('remaining content length: {}'.format(len(content[length_to_write:])))

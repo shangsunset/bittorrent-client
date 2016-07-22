@@ -8,14 +8,13 @@ import socket
 import logging
 import datetime
 
-import requests
 from bcoding import bdecode
 
-from tracker import Tracker
-from torrent import Torrent
-from peer import Peer, PeerProtocol
-from file_manager import FileManager
-from utils import Pieces
+from .tracker import Tracker
+from .torrent import Torrent
+from .peer import Peer, PeerProtocol
+from .file_manager import FileManager
+from .utils import Pieces
 
 KEEPALIVE = bytes([0, 0, 0, 0])
 CHOKE = bytes([0, 0, 0, 1]) + bytes([0])
@@ -30,10 +29,8 @@ class TorrentClient():
         self.logger = logging.getLogger('main.torrent_client')
         self.loop = loop
         self.torrent = Torrent(torrent_file)
-        # self.download_destination = download_destination
-        # self.files_info = self.torrent.get_files_info()
-        self.pieces = Pieces(self.torrent) # save downloaded pieces
-        self.pieces_downloaded = [] # keep track blocks that are requested
+        self.pieces = Pieces(self.torrent)
+        self.pieces_downloaded = []
         tracker = Tracker(self.torrent)
         peers_list = tracker.connect()
         self.peers = [Peer(p['hostname'], p['port'], self.torrent)
