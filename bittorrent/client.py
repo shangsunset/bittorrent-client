@@ -101,7 +101,7 @@ class TorrentClient():
                 ConnectionResetError,
                 ConnectionAbortedError,
                 TimeoutError, OSError) as e:
-            self.logger.error('{}, {}'.format(e, peer.address))
+            self.logger.error('connect to peer: {}, {}'.format(e, peer.address))
 
     async def _connection_handler(self, peer):
         self.logger.info('connected with peer {}'.format(peer.address))
@@ -284,8 +284,11 @@ class TorrentClient():
                 self.pieces_downloaded.append(piece_index)
 
                 self.logger.info('we have piece {}'.format(piece_index))
-                # self.logger.info('downloaded: {}, total: {}'.format(len(self.pieces_downloaded), self.torrent.number_of_pieces))
-                self.file_manager.write(piece, peer)
+                self.logger.info('downloaded: {}, total: {}'.format(len(self.pieces_downloaded), self.torrent.number_of_pieces))
+                try:
+                    self.file_manager.write(piece_index, piece)
+                except IOError as e:
+                    self.logger.error(e)
                 if len(self.pieces_downloaded) == self.torrent.number_of_pieces:
                     self.logger.info('finished downloading!!!')
                     return
