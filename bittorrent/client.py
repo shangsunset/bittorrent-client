@@ -12,7 +12,7 @@ from bcoding import bdecode
 
 from .tracker import Tracker
 from .torrent import Torrent
-from .peer import Peer, PeerProtocol
+from .peer import Peer
 from .file_manager import FileManager
 from .utils import Pieces
 

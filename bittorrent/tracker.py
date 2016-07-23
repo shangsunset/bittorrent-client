@@ -5,9 +5,9 @@ import struct
 import time
 from random import randint
 from urllib.parse import urlparse, urlencode
+from urllib.request import urlopen
 
 from bcoding import bdecode
-import requests
 
 CONNECT = 0
 ANNOUNCE = 1
@@ -104,8 +104,9 @@ class Tracker():
             'event': 'started'
         }
 
-        r = requests.get(self.url, params=params)
-        response = bdecode(r.content)
+        url = self.url + '?' + urlencode(params)
+        r = urlopen(url)
+        response = bdecode(r.read())
         if 'failure reason' not in response:
             return self._decode_peers(response['peers'])
         else:
