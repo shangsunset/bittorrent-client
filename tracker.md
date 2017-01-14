@@ -33,8 +33,11 @@ So if `failure` is not in the response, simply return decoded peer list. if requ
 
 ## Connecting via UDP
 Using HTTP introduces significant overhead. About 10 packets are used for a request plus response containing 50 peers and the total number of bytes used is about 1206. This overhead can be reduced significantly by using a UDP based protocol. The protocol proposed here uses 4 packets and about 618 bytes, reducing traffic by 50%. For a client, saving 1 kbyte every hour isn't significant, but for a tracker serving a million peers, reducing traffic by 50% matters a lot. An additional advantage is that a UDP based binary protocol doesn't require a complex parser and no connection handling, reducing the complexity of tracker code and increasing it's performance.
+
 In `_connect_via_udp()`, first step is to make a connect request: `_connect_request()`. To send a message to the tracker server, you need to generate a random number as `transition_id` and `action` which is number `0`.
+
 After converting the message to a packet, send it to the tracker server using `socket` with `hostname` and `port` provided in the torrent.
+
 In the response from the tracker server, there is `action`, `transition_id` you generated earlier, and `connection_id`.
 
 - Check whether the packet is at least 16 bytes.
